@@ -114,6 +114,7 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
                     Long currentBlockId = commonBlockId;
                     List<BlockImpl> forkBlocks = new ArrayList<>();
 
+                    boolean processedAll = true;
                     outer:
                     while (true) {
 
@@ -132,6 +133,7 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 } catch (NxtException.ValidationException e) {
                                     Logger.logDebugMessage("Cannot validate block: " + e.toString()
                                             + ", will try again later", e);
+                                    processedAll = false;
                                     break outer;
                                 } catch (RuntimeException e) {
                                     Logger.logDebugMessage("Failed to parse block: " + e.toString(), e);
@@ -157,7 +159,11 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                     }
 
-                    if (! forkBlocks.isEmpty() && blockchain.getLastBlock().getHeight() - commonBlock.getHeight() < 720) {
+                    if (forkBlocks.size() > 0) {
+                        processedAll = false;
+                    }
+
+                    if (! processedAll && blockchain.getLastBlock().getHeight() - commonBlock.getHeight() < 720) {
                         processFork(peer, forkBlocks, commonBlock);
                     }
 
@@ -286,11 +292,13 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
                     while (! blockchain.getLastBlock().getId().equals(commonBlock.getId()) && popLastBlock()) {
                     }
 
+                    int pushedForkBlocks = 0;
                     if (blockchain.getLastBlock().getId().equals(commonBlock.getId())) {
                         for (BlockImpl block : forkBlocks) {
                             if (blockchain.getLastBlock().getId().equals(block.getPreviousBlockId())) {
                                 try {
                                     pushBlock(block);
+                                    pushedForkBlocks += 1;
                                 } catch (BlockNotAcceptedException e) {
                                     peer.blacklist(e);
                                     break;
@@ -299,7 +307,7 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
                         }
                     }
 
-                    needsRescan = blockchain.getLastBlock().getCumulativeDifficulty().compareTo(curCumulativeDifficulty) < 0;
+                    needsRescan = pushedForkBlocks > 0 && blockchain.getLastBlock().getCumulativeDifficulty().compareTo(curCumulativeDifficulty) < 0;
                     if (needsRescan) {
                         Logger.logDebugMessage("Rescan caused by peer " + peer.getPeerAddress() + ", blacklisting");
                         peer.blacklist();
@@ -814,7 +822,7 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
         return transaction != null && hasAllReferencedTransactions(transaction, timestamp, count + 1);
     }
 
-    private volatile boolean validateAtScan = false;
+    private volatile boolean validateAtScan = Nxt.getBooleanProperty("nxt.forceValidate");
 
     void validateAtNextScan() {
         validateAtScan = true;
@@ -830,13 +838,11 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
             Account.clear();
             Alias.clear();
             Asset.clear();
-            Generator.clear();
             Order.clear();
             Poll.clear();
             Trade.clear();
             Vote.clear();
             DigitalGoodsStore.clear();
-            transactionProcessor.clear();
             try (Connection con = Db.getConnection(); PreparedStatement pstmt = con.prepareStatement("SELECT * FROM block ORDER BY db_id ASC")) {
                 Long currentBlockId = Genesis.GENESIS_BLOCK_ID;
                 BlockImpl currentBlock;
@@ -878,6 +884,8 @@ final class BlockchainProcessorImpl implements BlockchainProcessor {
                 throw new RuntimeException(e.toString(), e);
             }
             validateAtScan = false;
+            transactionProcessor.clear();
+            Generator.clear();
             Logger.logMessage("...done");
             isScanning = false;
         } // synchronized
