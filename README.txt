@@ -12,6 +12,10 @@ successfully". Open a browser, without stopping the java process, and go to
 http://localhost:7876 , where the Nxt UI should now be available. To stop the
 application, type Ctrl-C inside the console window.
 
+Warning: It is better to use only latin characters and no spaces in the path
+to the Nxt installation directory, as the use of special characters may result
+in permissions denied error in the browser, which is a known jetty issue.
+
 
 Customization:
 
@@ -27,6 +31,17 @@ settings in nxt.properties override those in nxt-default.properties. This way,
 when upgrading the software, you can safely overwrite nxt-default.properties
 with the updated file from the new package, while your customizations remain
 safe in the nxt.properties file.
+
+
+How to contribute?
+
+There are many ways to contribute to Nxt. Here are some examples:
+
+ * create pull requests
+ * review pull requests
+ * review existing code
+ * create issues (aka feature ideas, bug reports, documentation etc.)
+ * answer issues
 
 
 Technical details:
@@ -57,7 +72,7 @@ from scratch.
 The default Nxt client does not store any wallet-type file on disk. Unlike
 bitcoin, your password is the only thing you need to get access to your account,
 and is the only piece of data you need to backup or remember. This also means
-that anybody can get access to your account with only you password - so make
+that anybody can get access to your account with only your password - so make
 sure it is long and random. A weak password will result in your funds being
 stolen immediately.
 
@@ -87,6 +102,8 @@ Compiling:
 
 The source is included in the src subdirectory. To compile it on linux, just
 run the enclosed compile.sh script. This will compile all java classes and
-package them in an nxt.jar file, replacing the existing one.
-
+put them under the classes subdirectory, which is already in the classpath
+used by the run.sh startup script. The compiled class files can optionally be
+packaged in a nxt.jar file using the enclosed jar.sh script, and then nxt.jar
+should be included in the classpath instead of the classes subdirectory.
 

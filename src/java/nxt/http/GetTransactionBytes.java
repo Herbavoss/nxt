@@ -17,7 +17,7 @@ public final class GetTransactionBytes extends APIServlet.APIRequestHandler {
     static final GetTransactionBytes instance = new GetTransactionBytes();
 
     private GetTransactionBytes() {
-        super("transaction");
+        super(new APITag[] {APITag.TRANSACTIONS}, "transaction");
     }
 
     @Override
@@ -28,7 +28,7 @@ public final class GetTransactionBytes extends APIServlet.APIRequestHandler {
             return MISSING_TRANSACTION;
         }
 
-        Long transactionId;
+        long transactionId;
         Transaction transaction;
         try {
             transactionId = Convert.parseUnsignedLong(transactionValue);
@@ -44,7 +44,7 @@ public final class GetTransactionBytes extends APIServlet.APIRequestHandler {
                 return UNKNOWN_TRANSACTION;
             }
         } else {
-            response.put("confirmations", Nxt.getBlockchain().getLastBlock().getHeight() - transaction.getHeight());
+            response.put("confirmations", Nxt.getBlockchain().getHeight() - transaction.getHeight());
         }
         response.put("transactionBytes", Convert.toHexString(transaction.getBytes()));
         response.put("unsignedTransactionBytes", Convert.toHexString(transaction.getUnsignedBytes()));

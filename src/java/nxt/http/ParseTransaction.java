@@ -1,43 +1,39 @@
 package nxt.http;
 
-import nxt.Nxt;
 import nxt.NxtException;
 import nxt.Transaction;
 import nxt.util.Convert;
+import nxt.util.Logger;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONStreamAware;
 
 import javax.servlet.http.HttpServletRequest;
-
-import static nxt.http.JSONResponses.INCORRECT_TRANSACTION_BYTES;
-import static nxt.http.JSONResponses.MISSING_TRANSACTION_BYTES;
 
 public final class ParseTransaction extends APIServlet.APIRequestHandler {
 
     static final ParseTransaction instance = new ParseTransaction();
 
     private ParseTransaction() {
-        super("transactionBytes");
+        super(new APITag[] {APITag.TRANSACTIONS}, "transactionBytes", "transactionJSON");
     }
 
     @Override
-    JSONStreamAware processRequest(HttpServletRequest req) throws NxtException.ValidationException {
+    JSONStreamAware processRequest(HttpServletRequest req) throws NxtException {
 
-        String transactionBytes = req.getParameter("transactionBytes");
-        if (transactionBytes == null) {
-            return MISSING_TRANSACTION_BYTES;
-        }
-        JSONObject response;
+        String transactionBytes = Convert.emptyToNull(req.getParameter("transactionBytes"));
+        String transactionJSON = Convert.emptyToNull(req.getParameter("transactionJSON"));
+        Transaction transaction = ParameterParser.parseTransaction(transactionBytes, transactionJSON);
+        JSONObject response = JSONData.unconfirmedTransaction(transaction);
         try {
-            byte[] bytes = Convert.parseHexString(transactionBytes);
-            Transaction transaction = Nxt.getTransactionProcessor().parseTransaction(bytes);
-            transaction.validateAttachment();
-            response = JSONData.unconfirmedTransaction(transaction);
-            response.put("verify", transaction.verify());
+            transaction.validate();
         } catch (NxtException.ValidationException|RuntimeException e) {
-            //Logger.logDebugMessage(e.getMessage(), e);
-            return INCORRECT_TRANSACTION_BYTES;
+            Logger.logDebugMessage(e.getMessage(), e);
+            response.put("validate", false);
+            response.put("errorCode", 4);
+            response.put("errorDescription", "Invalid transaction: " + e.toString());
+            response.put("error", e.getMessage());
         }
+        response.put("verify", transaction.verifySignature());
         return response;
     }
 

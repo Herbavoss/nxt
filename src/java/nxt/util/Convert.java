@@ -1,9 +1,12 @@
 package nxt.util;
 
 import nxt.Constants;
+import nxt.NxtException;
 import nxt.crypto.Crypto;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Date;
 
@@ -17,6 +20,9 @@ public final class Convert {
     private Convert() {} //never
 
     public static byte[] parseHexString(String hex) {
+        if (hex == null) {
+            return null;
+        }
         byte[] bytes = new byte[hex.length() / 2];
         for (int i = 0; i < bytes.length; i++) {
             int char1 = hex.charAt(i * 2);
@@ -32,6 +38,9 @@ public final class Convert {
     }
 
     public static String toHexString(byte[] bytes) {
+        if (bytes == null) {
+            return null;
+        }
         char[] chars = new char[bytes.length * 2];
         for (int i = 0; i < bytes.length; i++) {
             chars[i * 2] = hexChars[((bytes[i] >> 4) & 0xF)];
@@ -48,38 +57,46 @@ public final class Convert {
         return id.toString();
     }
 
-    public static String toUnsignedLong(Long objectId) {
-        return toUnsignedLong(nullToZero(objectId));
-    }
-
-    public static Long parseUnsignedLong(String number) {
+    public static long parseUnsignedLong(String number) {
         if (number == null) {
-            return null;
+            return 0;
         }
         BigInteger bigInt = new BigInteger(number.trim());
         if (bigInt.signum() < 0 || bigInt.compareTo(two64) != -1) {
             throw new IllegalArgumentException("overflow: " + number);
         }
-        return zeroToNull(bigInt.longValue());
+        return bigInt.longValue();
     }
 
-    public static Long parseAccountId(String account) {
+    public static long parseLong(Object o) {
+        if (o == null) {
+            return 0;
+        } else if (o instanceof Long) {
+            return ((Long)o);
+        } else if (o instanceof String) {
+            return Long.parseLong((String)o);
+        } else {
+            throw new IllegalArgumentException("Not a long: " + o);
+        }
+    }
+
+    public static long parseAccountId(String account) {
         if (account == null) {
-            return null;
+            return 0;
         }
         account = account.toUpperCase();
         if (account.startsWith("NXT-")) {
-            return zeroToNull(Crypto.rsDecode(account.substring(4)));
+            return Crypto.rsDecode(account.substring(4));
         } else {
             return parseUnsignedLong(account);
         }
     }
 
-    public static String rsAccount(Long accountId) {
-        return "NXT-" + Crypto.rsEncode(nullToZero(accountId));
+    public static String rsAccount(long accountId) {
+        return "NXT-" + Crypto.rsEncode(accountId);
     }
 
-    public static Long fullHashToId(byte[] hash) {
+    public static long fullHashToId(byte[] hash) {
         if (hash == null || hash.length < 8) {
             throw new IllegalArgumentException("Invalid hash: " + Arrays.toString(hash));
         }
@@ -87,31 +104,15 @@ public final class Convert {
         return bigInteger.longValue();
     }
 
-    public static Long fullHashToId(String hash) {
+    public static long fullHashToId(String hash) {
         if (hash == null) {
-            return null;
+            return 0;
         }
         return fullHashToId(Convert.parseHexString(hash));
     }
 
-    public static int getEpochTime() {
-        return (int)((System.currentTimeMillis() - Constants.EPOCH_BEGINNING + 500) / 1000);
-    }
-
     public static Date fromEpochTime(int epochTime) {
         return new Date(epochTime * 1000L + Constants.EPOCH_BEGINNING - 500L);
-    }
-
-    public static Long zeroToNull(long l) {
-        return l == 0 ? null : l;
-    }
-
-    public static long nullToZero(Long l) {
-        return l == null ? 0 : l;
-    }
-
-    public static int nullToZero(Integer i) {
-        return i == null ? 0 : i;
     }
 
     public static String emptyToNull(String s) {
@@ -132,6 +133,31 @@ public final class Convert {
             }
         }
         return null;
+    }
+
+    public static byte[] toBytes(String s) {
+        try {
+            return s.getBytes("UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e.toString(), e);
+        }
+    }
+
+    public static String toString(byte[] bytes) {
+        try {
+            return new String(bytes, "UTF-8").trim();
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e.toString(), e);
+        }
+    }
+
+    public static String readString(ByteBuffer buffer, int numBytes, int maxLength) throws NxtException.NotValidException {
+        if (numBytes > 3 * maxLength) {
+            throw new NxtException.NotValidException("Max parameter length exceeded");
+        }
+        byte[] bytes = new byte[numBytes];
+        buffer.get(bytes);
+        return Convert.toString(bytes);
     }
 
     public static String truncate(String s, String replaceNull, int limit, boolean dots) {

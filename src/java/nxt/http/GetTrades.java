@@ -1,56 +1,65 @@
 package nxt.http;
 
+import nxt.Account;
+import nxt.Asset;
 import nxt.NxtException;
 import nxt.Trade;
+import nxt.db.DbIterator;
+import nxt.db.DbUtils;
+import nxt.util.Convert;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONStreamAware;
 
 import javax.servlet.http.HttpServletRequest;
-import java.util.List;
 
 public final class GetTrades extends APIServlet.APIRequestHandler {
 
     static final GetTrades instance = new GetTrades();
 
     private GetTrades() {
-        super("asset", "firstIndex", "lastIndex");
+        super(new APITag[] {APITag.AE}, "asset", "account", "firstIndex", "lastIndex", "includeAssetInfo");
     }
 
     @Override
     JSONStreamAware processRequest(HttpServletRequest req) throws NxtException {
 
-        Long assetId = ParameterParser.getAsset(req).getId();
+        String assetId = Convert.emptyToNull(req.getParameter("asset"));
+        String accountId = Convert.emptyToNull(req.getParameter("account"));
 
-        int firstIndex, lastIndex;
-        try {
-            firstIndex = Integer.parseInt(req.getParameter("firstIndex"));
-            if (firstIndex < 0) {
-                firstIndex = 0;
-            }
-        } catch (NumberFormatException e) {
-            firstIndex = 0;
-        }
-        try {
-            lastIndex = Integer.parseInt(req.getParameter("lastIndex"));
-        } catch (NumberFormatException e) {
-            lastIndex = Integer.MAX_VALUE;
-        }
+        int firstIndex = ParameterParser.getFirstIndex(req);
+        int lastIndex = ParameterParser.getLastIndex(req);
+        boolean includeAssetInfo = !"false".equalsIgnoreCase(req.getParameter("includeAssetInfo"));
 
         JSONObject response = new JSONObject();
-
         JSONArray tradesData = new JSONArray();
+        DbIterator<Trade> trades = null;
         try {
-            List<Trade> trades = Trade.getTrades(assetId);
-            for (int i = firstIndex; i <= lastIndex && i < trades.size(); i++) {
-                tradesData.add(JSONData.trade(trades.get(trades.size() - 1 - i)));
+            if (accountId == null) {
+                Asset asset = ParameterParser.getAsset(req);
+                trades = asset.getTrades(firstIndex, lastIndex);
+            } else if (assetId == null) {
+                Account account = ParameterParser.getAccount(req);
+                trades = account.getTrades(firstIndex, lastIndex);
+            } else {
+                Asset asset = ParameterParser.getAsset(req);
+                Account account = ParameterParser.getAccount(req);
+                trades = Trade.getAccountAssetTrades(account.getId(), asset.getId(), firstIndex, lastIndex);
             }
-        } catch (RuntimeException e) {
-            response.put("error", e.toString());
+            while (trades.hasNext()) {
+                tradesData.add(JSONData.trade(trades.next(), includeAssetInfo));
+            }
+        } finally {
+            DbUtils.close(trades);
         }
         response.put("trades", tradesData);
 
         return response;
+    }
+
+    @Override
+    boolean startDbTransaction() {
+        return true;
     }
 
 }

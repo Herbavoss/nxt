@@ -13,12 +13,12 @@ public final class GetAskOrder extends APIServlet.APIRequestHandler {
     static final GetAskOrder instance = new GetAskOrder();
 
     private GetAskOrder() {
-        super("order");
+        super(new APITag[] {APITag.AE}, "order");
     }
 
     @Override
     JSONStreamAware processRequest(HttpServletRequest req) throws NxtException {
-        Long orderId = ParameterParser.getOrderId(req);
+        long orderId = ParameterParser.getOrderId(req);
         Order.Ask askOrder = Order.Ask.getAskOrder(orderId);
         if (askOrder == null) {
             return UNKNOWN_ORDER;

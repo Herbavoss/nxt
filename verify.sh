@@ -1,1 +1,2 @@
-java -cp nxt.jar:lib/*:conf nxt.VerifyTrace
+#!/bin/sh
+java -cp classes:lib/*:conf nxt.VerifyTrace

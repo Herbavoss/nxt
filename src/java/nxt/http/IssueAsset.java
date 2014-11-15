@@ -20,7 +20,7 @@ public final class IssueAsset extends CreateTransaction {
     static final IssueAsset instance = new IssueAsset();
 
     private IssueAsset() {
-        super("name", "description", "quantityQNT", "decimals");
+        super(new APITag[] {APITag.AE, APITag.CREATE_TRANSACTION}, "name", "description", "quantityQNT", "decimals");
     }
 
     @Override
@@ -66,11 +66,6 @@ public final class IssueAsset extends CreateTransaction {
         Attachment attachment = new Attachment.ColoredCoinsAssetIssuance(name, description, quantityQNT, decimals);
         return createTransaction(req, account, attachment);
 
-    }
-
-    @Override
-    final long minimumFeeNQT() {
-        return Constants.ASSET_ISSUANCE_FEE_NQT;
     }
 
 }

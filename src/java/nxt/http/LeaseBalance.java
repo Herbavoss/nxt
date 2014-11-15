@@ -17,7 +17,7 @@ public final class LeaseBalance extends CreateTransaction {
     static final LeaseBalance instance = new LeaseBalance();
 
     private LeaseBalance() {
-        super("period", "recipient");
+        super(new APITag[] {APITag.FORGING}, "period", "recipient");
     }
 
     @Override
@@ -38,7 +38,7 @@ public final class LeaseBalance extends CreateTransaction {
         }
 
         Account account = ParameterParser.getSenderAccount(req);
-        Long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req);
         Account recipientAccount = Account.getAccount(recipient);
         if (recipientAccount == null || recipientAccount.getPublicKey() == null) {
             JSONObject response = new JSONObject();

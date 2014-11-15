@@ -15,7 +15,7 @@ public final class StartForging extends APIServlet.APIRequestHandler {
     static final StartForging instance = new StartForging();
 
     private StartForging() {
-        super("secretPhrase");
+        super(new APITag[] {APITag.FORGING}, "secretPhrase");
     }
 
     @Override
@@ -33,6 +33,7 @@ public final class StartForging extends APIServlet.APIRequestHandler {
 
         JSONObject response = new JSONObject();
         response.put("deadline", generator.getDeadline());
+        response.put("hitTime", generator.getHitTime());
         return response;
 
     }

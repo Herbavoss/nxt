@@ -1,3 +1,26 @@
+/**
+ * @depends {3rdparty/jquery-2.1.0.js}
+ * @depends {3rdparty/bootstrap.js}
+ * @depends {3rdparty/big.js}
+ * @depends {3rdparty/jsbn.js}
+ * @depends {3rdparty/jsbn2.js}
+ * @depends {3rdparty/pako.js}
+ * @depends {3rdparty/webdb.js}
+ * @depends {3rdparty/ajaxmultiqueue.js}
+ * @depends {3rdparty/growl.js}
+ * @depends {3rdparty/zeroclipboard.js}
+ * @depends {crypto/curve25519.js}
+ * @depends {crypto/curve25519_.js}
+ * @depends {crypto/passphrasegenerator.js}
+ * @depends {crypto/sha256worker.js}
+ * @depends {crypto/3rdparty/cryptojs/aes.js}
+ * @depends {crypto/3rdparty/cryptojs/sha256.js}
+ * @depends {crypto/3rdparty/jssha256.js}
+ * @depends {crypto/3rdparty/seedrandom.js}
+ * @depends {util/converters.js}
+ * @depends {util/extensions.js}
+ * @depends {util/nxtaddress.js}
+ */
 var NRS = (function(NRS, $, undefined) {
 	"use strict";
 
@@ -5,9 +28,11 @@ var NRS = (function(NRS, $, undefined) {
 	NRS.state = {};
 	NRS.blocks = [];
 	NRS.genesis = "1739068987193023818";
+	NRS.genesisRS = "NXT-MRCC-2YLS-8M54-3CMAJ";
 
 	NRS.account = "";
 	NRS.accountRS = ""
+	NRS.publicKey = "";
 	NRS.accountInfo = {};
 
 	NRS.database = null;
@@ -28,15 +53,29 @@ var NRS = (function(NRS, $, undefined) {
 	NRS.selectedContext = null;
 
 	NRS.currentPage = "dashboard";
+	NRS.currentSubPage = "";
+	NRS.pageNumber = 1;
+	//NRS.itemsPerPage = 50;  /* Now set in nrs.settings.js */
+
 	NRS.pages = {};
 	NRS.incoming = {};
-
-	NRS.hasLocalStorage = true;
+	
+	if(!_checkDOMenabled())
+		NRS.hasLocalStorage = false;
+	else
+		NRS.hasLocalStorage = true;
+	
 	NRS.inApp = false;
+	NRS.appVersion = "";
+	NRS.appPlatform = "";
 	NRS.assetTableKeys = [];
 
+	var stateInterval;
+	var stateIntervalSeconds = 30;
+	var isScanning = false;
+
 	NRS.init = function() {
-		if (location.port && location.port != "6876") {
+		if (window.location.port && window.location.port != "6876") {
 			$(".testnet_only").hide();
 		} else {
 			NRS.isTestNet = true;
@@ -58,30 +97,54 @@ var NRS = (function(NRS, $, undefined) {
 			NRS.hasLocalStorage = false;
 		}
 
+		if (NRS.getCookie("remember_passphrase")) {
+			$("#remember_password").prop("checked", true);
+		}
+
 		NRS.createDatabase(function() {
 			NRS.getSettings();
 		});
 
 		NRS.getState(function() {
-			NRS.checkAliasVersions();
+			setTimeout(function() {
+				NRS.checkAliasVersions();
+			}, 5000);
 		});
 
 		NRS.showLockscreen();
 
-		if (window.parent && window.location.href.indexOf("?app") != -1) {
-			NRS.inApp = true;
+		if (window.parent) {
+			var match = window.location.href.match(/\?app=?(win|mac|lin)?\-?([\d\.]+)?/i);
 
-			$("#show_console").hide();
+			if (match) {
+				NRS.inApp = true;
+				if (match[1]) {
+					NRS.appPlatform = match[1];
+				}
+				if (match[2]) {
+					NRS.appVersion = match[2];
+				}
 
-			parent.postMessage("loaded", "*");
+				if (!NRS.appPlatform || NRS.appPlatform == "mac") {
+					var macVersion = navigator.userAgent.match(/OS X 10_([0-9]+)/i);
+					if (macVersion && macVersion[1]) {
+						macVersion = parseInt(macVersion[1]);
 
-			window.addEventListener("message", receiveMessage, false);
+						if (macVersion < 9) {
+							$(".modal").removeClass("fade");
+						}
+					}
+				}
+
+				$("#show_console").hide();
+
+				parent.postMessage("loaded", "*");
+
+				window.addEventListener("message", receiveMessage, false);
+			}
 		}
 
-		//every 30 seconds check for new block..
-		setInterval(function() {
-			NRS.getState();
-		}, 1000 * 30);
+		NRS.setStateInterval(30);
 
 		if (!NRS.isTestNet) {
 			setInterval(NRS.checkAliasVersions, 1000 * 60 * 60);
@@ -102,10 +165,22 @@ var NRS = (function(NRS, $, undefined) {
 			$(".popover").remove();
 		});
 
-		$(window).on("resize.asset", function() {
+		_fix();
+
+		$(window).on("resize", function() {
+			_fix();
+
 			if (NRS.currentPage == "asset_exchange") {
 				NRS.positionAssetSidebar();
 			}
+		});
+
+		$("[data-toggle='tooltip']").tooltip();
+
+		$(".sidebar .treeview").tree();
+
+		$("#dgs_search_account_top, #dgs_search_account_center").mask("NXT-****-****-****-*****", {
+			"unmask": false
 		});
 
 		/*
@@ -123,29 +198,64 @@ var NRS = (function(NRS, $, undefined) {
 		});*/
 	}
 
+	function _fix() {
+		var height = $(window).height() - $("body > .header").height();
+		//$(".wrapper").css("min-height", height + "px");
+		var content = $(".wrapper").height();
+
+		$(".content.content-stretch:visible").width($(".page:visible").width());
+
+		if (content > height) {
+			$(".left-side, html, body").css("min-height", content + "px");
+		} else {
+			$(".left-side, html, body").css("min-height", height + "px");
+		}
+	}
+
+	NRS.setStateInterval = function(seconds) {
+		if (seconds == stateIntervalSeconds && stateInterval) {
+			return;
+		}
+
+		if (stateInterval) {
+			clearInterval(stateInterval);
+		}
+
+		stateIntervalSeconds = seconds;
+
+		stateInterval = setInterval(function() {
+			NRS.getState();
+		}, 1000 * seconds);
+	}
+
 	NRS.getState = function(callback) {
 		NRS.sendRequest("getBlockchainStatus", function(response) {
 			if (response.errorCode) {
 				//todo
 			} else {
-				if (!("lastBlock" in NRS.state)) {
-					//first time...
-					NRS.state = response;
+				var firstTime = !("lastBlock" in NRS.state);
+				var previousLastBlock = (firstTime ? "0" : NRS.state.lastBlock);
 
+				NRS.state = response;
+
+				if (firstTime) {
 					$("#nrs_version").html(NRS.state.version).removeClass("loading_dots");
-
 					NRS.getBlock(NRS.state.lastBlock, NRS.handleInitialBlocks);
 				} else if (NRS.state.isScanning) {
+					//do nothing but reset NRS.state so that when isScanning is done, everything is reset.
+					isScanning = true;
+				} else if (isScanning) {
+					//rescan is done, now we must reset everything...
+					isScanning = false;
 					NRS.blocks = [];
 					NRS.tempBlocks = [];
 					NRS.getBlock(NRS.state.lastBlock, NRS.handleInitialBlocks);
-					NRS.getInitialTransactions();
 					if (NRS.account) {
+						NRS.getInitialTransactions();
 						NRS.getAccountInfo();
 					}
-				} else if (NRS.state.lastBlock != response.lastBlock) {
+				} else if (previousLastBlock != NRS.state.lastBlock) {
 					NRS.tempBlocks = [];
-					NRS.state = response;
 					if (NRS.account) {
 						NRS.getAccountInfo();
 					}
@@ -159,22 +269,28 @@ var NRS = (function(NRS, $, undefined) {
 							NRS.handleIncomingTransactions(unconfirmedTransactions, false);
 						});
 					}
+					//only done so that download progress meter updates correctly based on lastFeederHeight
+					if (NRS.downloadingBlockchain) {
+						NRS.updateBlockchainDownloadProgress();
+					}
 				}
 
 				if (callback) {
 					callback();
 				}
 			}
+			/* Checks if the client is connected to active peers */
+			NRS.checkConnected();
 		});
 	}
 
-	$("#logo, .sidebar-menu a").click(function(event, data) {
+	$("#logo, .sidebar-menu a").click(function(e, data) {
 		if ($(this).hasClass("ignore")) {
 			$(this).removeClass("ignore");
 			return;
 		}
 
-		event.preventDefault();
+		e.preventDefault();
 
 		if ($(this).data("toggle") == "modal") {
 			return;
@@ -222,8 +338,12 @@ var NRS = (function(NRS, $, undefined) {
 		//NRS.previousPage = NRS.currentPage;
 		NRS.currentPage = page;
 		NRS.currentSubPage = "";
+		NRS.pageNumber = 1;
+		NRS.showPageNumbers = false;
 
 		if (NRS.pages[page]) {
+			NRS.pageLoading();
+
 			if (data && data.callback) {
 				NRS.pages[page](data.callback);
 			} else if (data) {
@@ -240,33 +360,106 @@ var NRS = (function(NRS, $, undefined) {
 		NRS.goToPage($(this).data("page"));
 	});
 
-	NRS.goToPage = function(page) {
+	NRS.loadPage = function(page, callback) {
+		NRS.pageLoading();
+		NRS.pages[page](callback);
+	}
+
+	NRS.goToPage = function(page, callback) {
 		var $link = $("ul.sidebar-menu a[data-page=" + page + "]");
 
-		if ($link.length) {
-			$link.trigger("click");
+		if ($link.length > 1) {
+			if ($link.last().is(":visible")) {
+				$link = $link.last();
+			} else {
+				$link = $link.first();
+			}
+		}
+
+		if ($link.length == 1) {
+			if (callback) {
+				$link.trigger("click", [{
+					"callback": callback
+				}]);
+			} else {
+				$link.trigger("click");
+			}
 		} else {
 			NRS.currentPage = page;
+			NRS.currentSubPage = "";
+			NRS.pageNumber = 1;
+			NRS.showPageNumbers = false;
+
 			$("ul.sidebar-menu a.active").removeClass("active");
 			$(".page").hide();
 			$("#" + page + "_page").show();
 			if (NRS.pages[page]) {
-				NRS.pages[page]();
+				NRS.pageLoading();
+				NRS.pages[page](callback);
 			}
 		}
 	}
 
 	NRS.pageLoading = function() {
+		NRS.hasMorePages = false;
+
 		var $pageHeader = $("#" + NRS.currentPage + "_page .content-header h1");
 		$pageHeader.find(".loading_dots").remove();
 		$pageHeader.append("<span class='loading_dots'><span>.</span><span>.</span><span>.</span></span>");
 	}
 
 	NRS.pageLoaded = function(callback) {
-		$("#" + NRS.currentPage + "_page .content-header h1").find(".loading_dots").remove();
+		var $currentPage = $("#" + NRS.currentPage + "_page");
+
+		$currentPage.find(".content-header h1 .loading_dots").remove();
+
+		if ($currentPage.hasClass("paginated")) {
+			NRS.addPagination();
+		}
+
 		if (callback) {
 			callback();
 		}
+	}
+
+	NRS.addPagination = function(section) {
+		var output = "";
+
+		if (NRS.pageNumber == 2) {
+			output += "<a href='#' data-page='1'>&laquo; " + $.t("previous_page") + "</a>";
+		} else if (NRS.pageNumber > 2) {
+			//output += "<a href='#' data-page='1'>&laquo; First Page</a>";
+			output += " <a href='#' data-page='" + (NRS.pageNumber - 1) + "'>&laquo; " + $.t("previous_page") + "</a>";
+		}
+		if (NRS.hasMorePages) {
+			if (NRS.pageNumber > 1) {
+				output += "&nbsp;&nbsp;&nbsp;";
+			}
+			output += " <a href='#' data-page='" + (NRS.pageNumber + 1) + "'>" + $.t("next_page") + " &raquo;</a>";
+		}
+
+		var $paginationContainer = $("#" + NRS.currentPage + "_page .data-pagination");
+
+		if ($paginationContainer.length) {
+			$paginationContainer.html(output);
+		}
+	}
+
+	$(".data-pagination").on("click", "a", function(e) {
+		e.preventDefault();
+
+		NRS.goToPageNumber($(this).data("page"));
+	});
+
+	NRS.goToPageNumber = function(pageNumber) {
+		/*if (!pageLoaded) {
+			return;
+		}*/
+		NRS.pageNumber = pageNumber;
+
+		NRS.pageLoading();
+
+		NRS.pages[NRS.currentPage]();
 	}
 
 	NRS.createDatabase = function(callback) {
@@ -308,7 +501,7 @@ var NRS = (function(NRS, $, undefined) {
 		NRS.assetTableKeys = ["account", "accountRS", "asset", "description", "name", "position", "decimals", "quantityQNT", "groupName"];
 
 		try {
-			NRS.database = new WebDB("NRS_USER_DB", schema, 1, 4, function(error, db) {
+			NRS.database = new WebDB("NRS_USER_DB", schema, 2, 4, function(error, db) {
 				if (!error) {
 					NRS.databaseSupport = true;
 
@@ -317,7 +510,7 @@ var NRS = (function(NRS, $, undefined) {
 					NRS.database.select("data", [{
 						"id": "asset_exchange_version"
 					}], function(error, result) {
-						if (!result.length) {
+						if (!result || !result.length) {
 							NRS.database.delete("assets", [], function(error, affected) {
 								if (!error) {
 									NRS.database.insert("data", {
@@ -332,7 +525,7 @@ var NRS = (function(NRS, $, undefined) {
 					NRS.database.select("data", [{
 						"id": "closed_groups"
 					}], function(error, result) {
-						if (result.length) {
+						if (result && result.length) {
 							NRS.closedGroups = result[0].contents.split("#");
 						} else {
 							NRS.database.insert("data", {
@@ -344,12 +537,36 @@ var NRS = (function(NRS, $, undefined) {
 					if (callback) {
 						callback();
 					}
+				} else {
+					if (callback) {
+						callback();
+					}
 				}
 			});
 		} catch (err) {
 			NRS.database = null;
 			NRS.databaseSupport = false;
+			if (callback) {
+				callback();
+			}
 		}
+	}
+	
+	/* Display connected state in Sidebar */
+	NRS.checkConnected = function() {
+		NRS.sendRequest("getPeers+", {
+			"state": "CONNECTED"
+		}, function(response) {
+			if (response.peers && response.peers.length) {
+				$("#connected_indicator").addClass("connected");
+				$("#connected_indicator span").html($.t("Connected")).attr("data-i18n", "connected");
+				$("#connected_indicator").show();
+			} else {
+				$("#connected_indicator").removeClass("connected");
+				$("#connected_indicator span").html($.t("Not Connected")).attr("data-i18n", "not_connected");
+				$("#connected_indicator").show();
+			}
+		});
 	}
 
 	NRS.getAccountInfo = function(firstRun, callback) {
@@ -360,24 +577,29 @@ var NRS = (function(NRS, $, undefined) {
 
 			NRS.accountInfo = response;
 
-			var preferredAccountFormat = (NRS.settings["reed_solomon"] ? NRS.accountRS : NRS.account);
-			if (!preferredAccountFormat) {
-				preferredAccountFormat = NRS.account;
-			}
 			if (response.errorCode) {
-				$("#account_balance, #account_forged_balance").html("0");
-				$("#account_nr_assets").html("0");
-
+				$("#account_balance, #account_balance_sidebar, #account_nr_assets, #account_assets_balance, #account_message_count").html("0");
+				
 				if (NRS.accountInfo.errorCode == 5) {
 					if (NRS.downloadingBlockchain) {
-						$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html("The blockchain is currently downloading. Please wait until it is up to date." + (NRS.newlyCreatedAccount ? " Your account ID is: <strong>" + String(preferredAccountFormat).escapeHTML() + "</strong>" : "")).show();
+						if (NRS.newlyCreatedAccount) {
+							$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html($.t("status_new_account", {
+								"account_id": String(NRS.accountRS).escapeHTML(),
+								"public_key": String(NRS.publicKey).escapeHTML()
+							}) + "<br /><br />" + $.t("status_blockchain_downloading")).show();
+						} else {
+							$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html($.t("status_blockchain_downloading")).show();
+						}
 					} else if (NRS.state && NRS.state.isScanning) {
-						$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html("The blockchain is currently rescanning. Please wait until that has completed.").show();
+						$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html($.t("status_blockchain_rescanning")).show();
 					} else {
-						$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html("Welcome to your brand new account. You should fund it with some coins. Your account ID is: <strong>" + String(preferredAccountFormat).escapeHTML() + "</strong>").show();
+						$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html($.t("status_new_account", {
+							"account_id": String(NRS.accountRS).escapeHTML(),
+							"public_key": String(NRS.publicKey).escapeHTML()
+						})).show();
 					}
 				} else {
-					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html(NRS.accountInfo.errorDescription ? NRS.accountInfo.errorDescription.escapeHTML() : "An unknown error occured.").show();
+					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html(NRS.accountInfo.errorDescription ? NRS.accountInfo.errorDescription.escapeHTML() : $.t("error_unknown")).show();
 				}
 			} else {
 				if (NRS.accountRS && NRS.accountInfo.accountRS != NRS.accountRS) {
@@ -388,11 +610,11 @@ var NRS = (function(NRS, $, undefined) {
 				}
 
 				if (NRS.downloadingBlockchain) {
-					$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html("The blockchain is currently downloading. Please wait until it is up to date." + (NRS.newlyCreatedAccount ? " Your account ID is: <strong>" + String(preferredAccountFormat).escapeHTML() + "</strong>" : "")).show();
+					$("#dashboard_message").addClass("alert-success").removeClass("alert-danger").html($.t("status_blockchain_downloading")).show();
 				} else if (NRS.state && NRS.state.isScanning) {
-					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html("The blockchain is currently rescanning. Please wait until that has completed.").show();
+					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html($.t("status_blockchain_rescanning")).show();
 				} else if (!NRS.accountInfo.publicKey) {
-					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html("<b>Warning!</b>: Your account does not have a public key! This means it's not as protected as other accounts. You must make an outgoing transaction to fix this issue. (<a href='#' data-toggle='modal' data-target='#send_message_modal'>send a message</a>, <a href='#' data-toggle='modal' data-target='#register_alias_modal'>buy an alias</a>, <a href='#' data-toggle='modal' data-target='#send_money_modal'>send Nxt</a>, ...)").show();
+					$("#dashboard_message").addClass("alert-danger").removeClass("alert-success").html($.t("no_public_key_warning") + " " + $.t("public_key_actions")).show();
 				} else {
 					$("#dashboard_message").hide();
 				}
@@ -404,7 +626,7 @@ var NRS = (function(NRS, $, undefined) {
 					NRS.database.select("data", [{
 						"id": "asset_balances_" + NRS.account
 					}], function(error, asset_balance) {
-						if (!error && asset_balance.length) {
+						if (asset_balance && asset_balance.length) {
 							var previous_balances = asset_balance[0].contents;
 
 							if (!NRS.accountInfo.assetBalances) {
@@ -444,20 +666,71 @@ var NRS = (function(NRS, $, undefined) {
 					}
 				}
 
-				$("#account_balance").html(NRS.formatStyledAmount(response.unconfirmedBalanceNQT));
+				$("#account_balance, #account_balance_sidebar").html(NRS.formatStyledAmount(response.unconfirmedBalanceNQT));
 				$("#account_forged_balance").html(NRS.formatStyledAmount(response.forgedBalanceNQT));
 
+				/*** Need to clean up and optimize code if possible ***/
 				var nr_assets = 0;
-
+				var assets = {
+					"asset": [],
+					"quantity": {},
+					"trades": {}
+				};
+				var tradeNum = 0;
+				var assets_LastTrade = [];
 				if (response.assetBalances) {
 					for (var i = 0; i < response.assetBalances.length; i++) {
 						if (response.assetBalances[i].balanceQNT != "0") {
 							nr_assets++;
+							assets.quantity[response.assetBalances[i].asset] = response.assetBalances[i].balanceQNT;
+							assets.asset.push(response.assetBalances[i].asset);
+							NRS.sendRequest("getTrades", {
+								"asset": response.assetBalances[i].asset,
+								"firstIndex": 0,
+								"lastIndex": 0
+							}, function(responseTrade, input) {
+								if (responseTrade.trades && responseTrade.trades.length) {
+									assets.trades[input.asset] = responseTrade.trades[0].priceNQT/100000000;
+								}
+								else{
+									assets.trades[input.asset] = 0;
+								}
+								if (tradeNum == nr_assets-1)
+									NRS.updateAssetsValue(assets);
+								else
+									tradeNum++;
+							});
+							
 						}
 					}
 				}
-
+				else {
+					$("#account_assets_balance").html(0);
+				}
+								
 				$("#account_nr_assets").html(nr_assets);
+
+				/* Display message count in top and limit to 100 for now because of possible performance issues*/	
+				NRS.sendRequest("getAccountTransactions+", {
+					"account": NRS.account,
+					"type": 1,
+					"subtype": 0,
+					"firstIndex": 0,
+					"lastIndex": 99
+				}, function(response) {
+					if (response.transactions && response.transactions.length) {
+						if (response.transactions.length > 99)
+							$("#account_message_count").empty().append("99+");
+						else
+							$("#account_message_count").empty().append(response.transactions.length);
+					} else {
+						$("#account_message_count").empty().append("0");
+					}
+				});	
+				
+				/***  ******************   ***/
+				
+			
 
 				if (NRS.lastBlockHeight) {
 					var isLeased = NRS.lastBlockHeight >= NRS.accountInfo.currentLeasingHeightFrom;
@@ -478,12 +751,12 @@ var NRS = (function(NRS, $, undefined) {
 				}
 
 				if (response.name) {
-					$("#account_name").html(response.name.escapeHTML());
+					$("#account_name").html(response.name.escapeHTML()).removeAttr("data-i18n");
 				}
 			}
 
 			if (firstRun) {
-				$("#account_balance, #account_forged_balance, #account_nr_assets").removeClass("loading_dots");
+				$("#account_balance, #account_balance_sidebar, #account_assets_balance, #account_nr_assets, #account_message_count").removeClass("loading_dots");
 			}
 
 			if (callback) {
@@ -492,27 +765,44 @@ var NRS = (function(NRS, $, undefined) {
 		});
 	}
 
+	NRS.updateAssetsValue = function(assets) {
+		var assetTotal = 0;
+		for (var i = 0; i < assets.asset.length; i++) {
+			if (assets.quantity[assets.asset[i]] && assets.trades[assets.asset[i]])
+				assetTotal += assets.quantity[assets.asset[i]]*assets.trades[assets.asset[i]];
+		}
+		
+		$("#account_assets_balance").html(NRS.formatStyledAmount(assetTotal));
+	}
+
 	NRS.updateAccountLeasingStatus = function() {
 		var accountLeasingLabel = "";
 		var accountLeasingStatus = "";
 
 		if (NRS.lastBlockHeight >= NRS.accountInfo.currentLeasingHeightFrom) {
-			accountLeasingLabel = "Leased Out";
-			accountLeasingStatus = "Your account effective balance is leased out starting from block " + String(NRS.accountInfo.currentLeasingHeightFrom).escapeHTML() + " until block " + String(NRS.accountInfo.currentLeasingHeightTo).escapeHTML() + " to account <a href='#' data-user='" + String(NRS.accountInfo.currentLessee).escapeHTML() + "' class='user_info'>" + String(NRS.accountInfo.currentLessee).escapeHTML() + "</a>";
-			$("#lease_balance_message").html("<strong>Remember</strong>: This lease will take effect after the current lease has ended.");
-
+			accountLeasingLabel = $.t("leased_out");
+			accountLeasingStatus = $.t("balance_is_leased_out", {
+				"start": String(NRS.accountInfo.currentLeasingHeightFrom).escapeHTML(),
+				"end": String(NRS.accountInfo.currentLeasingHeightTo).escapeHTML(),
+				"account": String(NRS.accountInfo.currentLessee).escapeHTML()
+			});
+			$("#lease_balance_message").html($.t("balance_leased_out_help"));
 		} else if (NRS.lastBlockHeight < NRS.accountInfo.currentLeasingHeightTo) {
-			accountLeasingLabel = "Leased Soon";
-			accountLeasingStatus = "Your account effective balance will be leased out starting from block " + String(NRS.accountInfo.currentLeasingHeightFrom).escapeHTML() + " until block " + String(NRS.accountInfo.currentLeasingHeightTo).escapeHTML() + " to account <a href='#' data-user='" + String(NRS.accountInfo.currentLessee).escapeHTML() + "' class='user_info'>" + String(NRS.accountInfo.currentLessee).escapeHTML() + "</a>";
-			$("#lease_balance_message").html("<strong>Remember</strong>: This lease will take effect after the current lease has ended.");
+			accountLeasingLabel = $.t("leased_soon");
+			accountLeasingStatus = $.t("balance_will_be_leased_out", {
+				"start": String(NRS.accountInfo.currentLeasingHeightFrom).escapeHTML(),
+				"end": String(NRS.accountInfo.currentLeasingHeightTo).escapeHTML(),
+				"account": String(NRS.accountInfo.currentLessee).escapeHTML()
+			});
+			$("#lease_balance_message").html($.t("balance_leased_out_help"));
 		} else {
-			accountLeasingStatus = "Your account effective balance is not leased out.";
-			$("#lease_balance_message").html("<strong>Remember</strong>: Once submitted the lease cannot be cancelled.");
+			accountLeasingStatus = $.t("balance_not_leased_out");
+			$("#lease_balance_message").html($.t("balance_leasing_help"));
 		}
 
 		if (NRS.accountInfo.effectiveBalanceNXT == 0) {
 			$("#forging_indicator").removeClass("forging");
-			$("#forging_indicator span").html("Not Forging");
+			$("#forging_indicator span").html($.t("not_forging")).attr("data-i18n", "not_forging");
 			$("#forging_indicator").show();
 			NRS.isForging = false;
 		}
@@ -523,13 +813,18 @@ var NRS = (function(NRS, $, undefined) {
 				accountLeasingLabel += ", ";
 				accountLeasingStatus += "<br /><br />";
 			}
-			accountLeasingLabel += NRS.accountInfo.lessors.length + (NRS.accountInfo.lessors.length == 1 ? " lessor" : "lessors");
-			accountLeasingStatus += NRS.accountInfo.lessors.length + " " + (NRS.accountInfo.lessors.length == 1 ? "lessor has" : "lessors have") + " leased their effective balance to your account.";
+
+			accountLeasingLabel += $.t("x_lessor", {
+				"count": NRS.accountInfo.lessors.length
+			});
+			accountLeasingStatus += $.t("x_lessor_lease", {
+				"count": NRS.accountInfo.lessors.length
+			});
 
 			var rows = "";
 
 			for (var i = 0; i < NRS.accountInfo.lessors.length; i++) {
-				var lessor = NRS.accountInfo.lessors[i];
+				var lessor = NRS.convertNumericToRSAccountFormat(NRS.accountInfo.lessors[i]);
 
 				rows += "<tr><td><a href='#' data-user='" + String(lessor).escapeHTML() + "'>" + NRS.getAccountTitle(lessor) + "</a></td></tr>";
 			}
@@ -609,22 +904,34 @@ var NRS = (function(NRS, $, undefined) {
 					if (asset.difference.charAt(0) != "-") {
 						var quantity = NRS.formatQuantity(asset.difference, asset.decimals)
 
-						$.growl("You received <a href='#' data-goto-asset='" + String(asset.asset).escapeHTML() + "'>" + quantity + " " + String(asset.name).escapeHTML() + (quantity == "1" ? " asset" : " assets") + "</a>.", {
-							"type": "success"
-						});
+						if (quantity != "0") {
+							$.growl($.t("you_received_assets", {
+								"asset": String(asset.asset).escapeHTML(),
+								"name": String(asset.name).escapeHTML(),
+								"count": quantity
+							}), {
+								"type": "success"
+							});
+						}
 					} else {
 						asset.difference = asset.difference.substring(1);
 
 						var quantity = NRS.formatQuantity(asset.difference, asset.decimals)
 
-						$.growl("You sold or transferred <a href='#' data-goto-asset='" + String(asset.asset).escapeHTML() + "'>" + quantity + " " + String(asset.name).escapeHTML() + (quantity == "1" ? " asset" : " assets") + "</a>.", {
-							"type": "success"
-						});
+						if (quantity != "0") {
+							$.growl($.t("you_sold_assets", {
+								"asset": String(asset.asset).escapeHTML(),
+								"name": String(asset.name).escapeHTML(),
+								"count": quantity
+							}), {
+								"type": "success"
+							});
+						}
 					}
 				});
 			}
 		} else {
-			$.growl("Multiple different assets have been sold and/or bought.", {
+			$.growl($.t("multiple_assets_differences"), {
 				"type": "success"
 			});
 		}
@@ -675,8 +982,31 @@ var NRS = (function(NRS, $, undefined) {
 			$("#downloading_blockchain .progress").hide();
 		} else {
 			$("#downloading_blockchain .progress").show();
-			$("#downloading_blockchain .progress-bar").css("width", percentage + "%").prop("aria-valuenow", percentage);
-			$("#downloading_blockchain .sr-only").html(percentage + "% Complete");
+			$("#downloading_blockchain .progress-bar").css("width", percentage + "%");
+			$("#downloading_blockchain .sr-only").html($.t("percent_complete", {
+				"percent": percentage
+			}));
+		}
+	}
+
+	NRS.checkIfOnAFork = function() {
+		if (!NRS.downloadingBlockchain) {
+			var onAFork = true;
+
+			if (NRS.blocks && NRS.blocks.length >= 10) {
+				for (var i = 0; i < 10; i++) {
+					if (NRS.blocks[i].generator != NRS.account) {
+						onAFork = false;
+						break;
+					}
+				}
+			}
+
+			if (onAFork) {
+				$.growl($.t("fork_warning"), {
+					"type": "danger"
+				});
+			}
 		}
 	}
 
@@ -693,14 +1023,14 @@ var NRS = (function(NRS, $, undefined) {
 					response.account = input.account;
 					NRS.showAccountModal(response);
 				} else {
-					$.growl("Nothing found, please try another query.", {
+					$.growl($.t("error_search_no_results"), {
 						"type": "danger"
 					});
 				}
 			});
 		} else {
 			if (!/^\d+$/.test(id)) {
-				$.growl("Invalid input. Search by ID or reed solomon account number.", {
+				$.growl($.t("error_search_invalid"), {
 					"type": "danger"
 				});
 				return;
@@ -726,7 +1056,7 @@ var NRS = (function(NRS, $, undefined) {
 									response.block = input.block;
 									NRS.showBlockModal(response);
 								} else {
-									$.growl("Nothing found, please try another query.", {
+									$.growl($.t("error_search_no_results"), {
 										"type": "danger"
 									});
 								}
@@ -750,4 +1080,18 @@ function receiveMessage(event) {
 		return;
 	}
 	//parent.postMessage("from iframe", "file://");
+}
+
+function _checkDOMenabled() {
+	var storage;
+	var fail;
+	var uid;
+	try {
+	  uid = new Date;
+	  (storage = window.localStorage).setItem(uid, uid);
+	  fail = storage.getItem(uid) != uid;
+	  storage.removeItem(uid);
+	  fail && (storage = false);
+	} catch (exception) {}
+	return storage;
 }

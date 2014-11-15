@@ -1,3 +1,6 @@
+/**
+ * @depends {nrs.js}
+ */
 var NRS = (function(NRS, $, undefined) {
 	NRS.normalVersion = {};
 	NRS.betaVersion = {};
@@ -42,6 +45,20 @@ var NRS = (function(NRS, $, undefined) {
 				}
 			}
 		});
+
+		if (NRS.inApp) {
+			//user uses an old version which does not supply the platform / version
+			if (NRS.appPlatform == "" || NRS.appVersion == "" || version_compare(NRS.appVersion, "2.0.0", "<")) {
+				$("#secondary_dashboard_message").removeClass("alert-success").addClass("alert-danger").html("A new version of the NXT Wallet application is available for download <a href='http://nxt.org/get-started-nxt/download-nxt-software' target='_blank'>here</a>. You must install it manually due to changes in the NRS startup procedure.").show();
+			}
+
+			/* Old code check
+			var noticeDate = new Date(2014, 9, 28);
+
+			if (new Date() > noticeDate) {
+				$("#secondary_dashboard_message").removeClass("alert-success").addClass("alert-danger").html("A new version of the NXT Wallet application is available for download <a href='http://nxt.org/get-started-nxt/download-nxt-software' target='_blank'>here</a>. You must install it manually due to changes in the NRS startup procedure.").show();
+			}*/
+		}
 	}
 
 	NRS.checkForNewVersion = function() {
@@ -54,7 +71,10 @@ var NRS = (function(NRS, $, undefined) {
 			installVersusBeta = NRS.versionCompare(NRS.state.version, NRS.betaVersion.versionNr);
 		}
 
-		$("#nrs_update_explanation span").hide();
+		$("#nrs_update_explanation > span").hide();
+
+		$("#nrs_update_explanation_wait").attr("style", "display: none !important");
+
 		$(".nrs_new_version_nr").html(NRS.normalVersion.versionNr).show();
 		$(".nrs_beta_version_nr").html(NRS.betaVersion.versionNr).show();
 
@@ -189,9 +209,9 @@ var NRS = (function(NRS, $, undefined) {
 				$("#nrs_update_drop_zone").hide();
 
 				if (e.data.sha256 == NRS.downloadedVersion.hash) {
-					$("#nrs_update_result").html("The downloaded version has been verified, the hash is correct. You may proceed with the installation.").attr("class", " ");
+					$("#nrs_update_result").html($.t("success_hash_verification")).attr("class", " ");
 				} else {
-					$("#nrs_update_result").html("The downloaded version hash does not compare to the specified hash in the blockchain. DO NOT PROCEED.").attr("class", "incorrect");
+					$("#nrs_update_result").html($.t("error_hash_verification")).attr("class", "incorrect");
 				}
 
 				$("#nrs_update_hash_version").html(NRS.downloadedVersion.versionNr);
