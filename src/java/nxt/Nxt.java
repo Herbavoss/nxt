@@ -17,7 +17,7 @@ import java.util.Properties;
 
 public final class Nxt {
 
-    public static final String VERSION = "1.3.3";
+    public static final String VERSION = "1.4.9";
     public static final String APPLICATION = "NRS";
 
     private static volatile Time time = new Time.EpochTime();
@@ -67,13 +67,17 @@ public final class Nxt {
     }
 
     public static String getStringProperty(String name) {
-        return getStringProperty(name, null);
+        return getStringProperty(name, null, false);
     }
 
     public static String getStringProperty(String name, String defaultValue) {
+        return getStringProperty(name, defaultValue, false);
+    }
+
+    public static String getStringProperty(String name, String defaultValue, boolean doNotLog) {
         String value = properties.getProperty(name);
         if (value != null && ! "".equals(value)) {
-            Logger.logMessage(name + " = \"" + value + "\"");
+            Logger.logMessage(name + " = \"" + (doNotLog ? "{not logged}" : value) + "\"");
             return value;
         } else {
             Logger.logMessage(name + " not defined");
@@ -121,6 +125,10 @@ public final class Nxt {
         return TransactionProcessorImpl.getInstance();
     }
 
+    public static Transaction.Builder newTransactionBuilder(byte[] senderPublicKey, long amountNQT, long feeNQT, short deadline, Attachment attachment) {
+        return new TransactionImpl.BuilderImpl((byte)1, senderPublicKey, amountNQT, feeNQT, deadline, (Attachment.AbstractAttachment)attachment);
+    }
+
     public static int getEpochTime() {
         return time.getTime();
     }
@@ -165,6 +173,7 @@ public final class Nxt {
             try {
                 long startTime = System.currentTimeMillis();
                 Logger.init();
+                logSystemProperties();
                 Db.init();
                 TransactionProcessorImpl.getInstance();
                 BlockchainProcessorImpl.getInstance();
@@ -178,6 +187,13 @@ public final class Nxt {
                 Trade.init();
                 AssetTransfer.init();
                 Vote.init();
+                Currency.init();
+                CurrencyBuyOffer.init();
+                CurrencySellOffer.init();
+                CurrencyFounder.init();
+                CurrencyMint.init();
+                CurrencyTransfer.init();
+                Exchange.init();
                 Peers.init();
                 Generator.init();
                 API.init();
@@ -206,6 +222,28 @@ public final class Nxt {
 
         private Init() {} // never
 
+    }
+
+    private static void logSystemProperties() {
+        String[] loggedProperties = new String[] {
+                "java.version",
+                "java.vm.version",
+                "java.vm.name",
+                "java.vendor",
+                "java.vm.vendor",
+                "java.home",
+                "java.library.path",
+                "java.class.path",
+                "os.arch",
+                "sun.arch.data.model",
+                "os.name",
+                "file.encoding"
+        };
+        for (String property : loggedProperties) {
+            Logger.logDebugMessage(String.format("%s = %s", property, System.getProperty(property)));
+        }
+        Logger.logDebugMessage(String.format("availableProcessors = %s", Runtime.getRuntime().availableProcessors()));
+        Logger.logDebugMessage(String.format("maxMemory = %s", Runtime.getRuntime().maxMemory()));
     }
 
     private Nxt() {} // never

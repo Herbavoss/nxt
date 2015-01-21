@@ -4,7 +4,7 @@ import org.json.simple.JSONObject;
 
 import java.util.List;
 
-public interface Transaction extends Comparable<Transaction> {
+public interface Transaction {
 
     public static interface Builder {
 
@@ -19,6 +19,12 @@ public interface Transaction extends Comparable<Transaction> {
         Builder encryptToSelfMessage(Appendix.EncryptToSelfMessage encryptToSelfMessage);
 
         Builder publicKeyAnnouncement(Appendix.PublicKeyAnnouncement publicKeyAnnouncement);
+
+        Builder timestamp(int timestamp);
+
+        Builder ecBlockHeight(int height);
+
+        Builder ecBlockId(long blockId);
 
         Transaction build() throws NxtException.NotValidException;
 
@@ -39,6 +45,8 @@ public interface Transaction extends Comparable<Transaction> {
     long getBlockId();
 
     Block getBlock();
+
+    short getIndex();
 
     int getTimestamp();
 

@@ -47,6 +47,7 @@ final class PeerImpl implements Peer {
     private volatile String platform;
     private volatile String application;
     private volatile String version;
+    private volatile boolean isOldVersion;
     private volatile long adjustedWeight;
     private volatile long blacklistingTime;
     private volatile State state;
@@ -86,6 +87,8 @@ final class PeerImpl implements Peer {
         } else if (state != State.NON_CONNECTED) {
             this.state = state;
             Peers.notifyListeners(this, Peers.Event.CHANGED_ACTIVE_PEER);
+        } else {
+            this.state = state;
         }
     }
 
@@ -119,7 +122,38 @@ final class PeerImpl implements Peer {
     }
 
     void setVersion(String version) {
+        if (this.version != null && this.version.equals(version)) {
+            return;
+        }
         this.version = version;
+        isOldVersion = false;
+        if (Nxt.APPLICATION.equals(application)) {
+            String[] versions;
+            if (version == null || (versions = version.split("\\.")).length < Constants.MIN_VERSION.length) {
+                isOldVersion = true;
+            } else {
+                for (int i = 0; i < Constants.MIN_VERSION.length; i++) {
+                    try {
+                        int v = Integer.parseInt(versions[i]);
+                        if (v > Constants.MIN_VERSION[i]) {
+                            isOldVersion = false;
+                            break;
+                        } else if (v < Constants.MIN_VERSION[i]) {
+                            isOldVersion = true;
+                            break;
+                        }
+                    } catch (NumberFormatException e) {
+                        isOldVersion = true;
+                        break;
+                    }
+                }
+            }
+            if (isOldVersion) {
+                Logger.logDebugMessage(String.format("Blacklisting %s version %s", peerAddress, version));
+                setState(State.NON_CONNECTED);
+                Peers.notifyListeners(this, Peers.Event.BLACKLIST);
+            }
+        }
     }
 
     @Override
@@ -201,7 +235,7 @@ final class PeerImpl implements Peer {
 
     @Override
     public boolean isBlacklisted() {
-        return blacklistingTime > 0 || Peers.knownBlacklistedPeers.contains(peerAddress);
+        return blacklistingTime > 0 || isOldVersion || Peers.knownBlacklistedPeers.contains(peerAddress);
     }
 
     @Override
@@ -212,8 +246,12 @@ final class PeerImpl implements Peer {
             // prevents erroneous blacklisting during loading of blockchain from scratch
             return;
         }
-        if (! isBlacklisted() && ! (cause instanceof IOException)) {
-            Logger.logDebugMessage("Blacklisting " + peerAddress + " because of: " + cause.toString(), cause);
+        if (! isBlacklisted()) {
+            if (cause instanceof IOException) {
+                Logger.logDebugMessage("Blacklisting " + peerAddress + " because of: " + cause.toString());
+            } else {
+                Logger.logDebugMessage("Blacklisting " + peerAddress + " because of: " + cause.toString(), cause);
+            }
         }
         blacklist();
     }
@@ -275,7 +313,7 @@ final class PeerImpl implements Peer {
             buf.append(address);
             if (port <= 0) {
                 buf.append(':');
-                buf.append(Constants.isTestnet ? Peers.TESTNET_PEER_PORT : Peers.DEFAULT_PEER_PORT);
+                buf.append(Peers.getDefaultPeerPort());
             }
             buf.append("/nxt");
             URL url = new URL(buf.toString());
@@ -375,14 +413,14 @@ final class PeerImpl implements Peer {
         } else if (getWeight() < o.getWeight()) {
             return 1;
         }
-        return 0;
+        return getPeerAddress().compareTo(o.getPeerAddress());
     }
 
     void connect() {
         JSONObject response = send(Peers.myPeerInfoRequest);
         if (response != null) {
             application = (String)response.get("application");
-            version = (String)response.get("version");
+            setVersion((String) response.get("version"));
             platform = (String)response.get("platform");
             shareAddress = Boolean.TRUE.equals(response.get("shareAddress"));
             String newAnnouncedAddress = Convert.emptyToNull((String)response.get("announcedAddress"));
@@ -396,10 +434,11 @@ final class PeerImpl implements Peer {
                 setAnnouncedAddress(peerAddress);
                 //Logger.logDebugMessage("Connected to peer without announced address, setting to " + peerAddress);
             }
-            if (analyzeHallmark(announcedAddress, (String)response.get("hallmark"))) {
+            analyzeHallmark(announcedAddress, (String)response.get("hallmark"));
+            if (!isOldVersion) {
                 setState(State.CONNECTED);
                 Peers.updateAddress(this);
-            } else {
+            } else if (!isBlacklisted()) {
                 blacklist();
             }
             lastUpdated = Nxt.getEpochTime();
@@ -428,10 +467,29 @@ final class PeerImpl implements Peer {
             String host = uri.getHost();
 
             Hallmark hallmark = Hallmark.parseHallmark(hallmarkString);
-            if (!hallmark.isValid()
-                    || !(hallmark.getHost().equals(host) || InetAddress.getByName(host).equals(InetAddress.getByName(hallmark.getHost())))) {
-                //Logger.logDebugMessage("Invalid hallmark for " + host + ", hallmark host is " + hallmark.getHost());
+            if (!hallmark.isValid()) {
+                Logger.logDebugMessage("Invalid hallmark " + hallmarkString + " for " + host);
+                this.hallmark = null;
                 return false;
+            }
+            if (!hallmark.getHost().equals(host)) {
+                InetAddress[] hosts = InetAddress.getAllByName(host);
+                InetAddress[] hallmarks =
+                        InetAddress.getAllByName(hallmark.getHost());
+                boolean validHost = false;
+                hostLoop: for (InetAddress nextHost : hosts) {
+                    for (InetAddress nextHallmark : hallmarks) {
+                        if (nextHost.equals(nextHallmark)) {
+                            validHost = true;
+                            break hostLoop;
+                        }
+                    }
+                }
+                if (!validHost) {
+                    Logger.logDebugMessage("Hallmark " + hallmarkString + " doesn't match " + host + ", hallmark host is " + hallmark.getHost());
+                    this.hallmark = null;
+                    return false;
+                }
             }
             this.hallmark = hallmark;
             long accountId = Account.getId(hallmark.getPublicKey());
@@ -464,6 +522,7 @@ final class PeerImpl implements Peer {
         } catch (URISyntaxException | RuntimeException e) {
             Logger.logDebugMessage("Failed to analyze hallmark for peer " + address + ", " + e.toString(), e);
         }
+        this.hallmark = null;
         return false;
 
     }
