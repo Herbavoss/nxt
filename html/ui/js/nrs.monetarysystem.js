@@ -80,7 +80,7 @@ var NRS = (function(NRS, $, undefined) {
 				$("#currency_current_supply").html(NRS.convertToQNTf(response.currentSupply, response.decimals).escapeHTML());
 				$("#currency_max_supply").html(NRS.convertToQNTf(response.maxSupply, response.decimals).escapeHTML());
 				$("#currency_decimals").html(String(response.decimals).escapeHTML());
-				$("#currency_description").html(String(response.description).escapeHTML());
+				$("#currency_description").html(String(response.description).autoLink());
 				var buyCurrencyButton = $("#buy_currency_button");
 				buyCurrencyButton.data("currency", currencyId);
 				buyCurrencyButton.data("decimals", response.decimals);
@@ -677,6 +677,7 @@ var NRS = (function(NRS, $, undefined) {
 							"<td>" + typeIcons + "</td>" +
 							"<td>" + NRS.formatQuantity(currency.unconfirmedUnits, currency.decimals) + "</td>" +
 							"<td>" +
+								"<a href='#' class='btn btn-xs btn-default' onClick='NRS.goToCurrency(&quot;" + code + "&quot;)' " + (!NRS.isExchangeable(currency.type) ? "disabled" : "") + ">" + $.t("exchange") + "</a> " +
 								"<a href='#' class='btn btn-xs btn-default' data-toggle='modal' data-target='#transfer_currency_modal' data-currency='" + String(currency.currency).escapeHTML() + "' data-code='" + code + "' data-decimals='" + decimals + "'>" + $.t("transfer") + "</a> " +
 								"<a href='#' class='btn btn-xs btn-default' data-toggle='modal' data-target='#publish_exchange_offer_modal' data-currency='" + String(currency.currency).escapeHTML() + "' data-code='" + code + "' data-decimals='" + decimals + "' " + (isOfferEnabled ? "" : "disabled") + " >" + $.t("offer") + "</a> " +
               				"<a href='#' class='btn btn-xs btn-default' data-toggle='modal' data-target='#claim_currency_modal' data-currency='" + currencyId + "' data-name='" + name + "' data-code='" + code + "' data-decimals='" + decimals + "' " + (currency.issuanceHeight <= NRS.lastBlockHeight && NRS.isClaimable(currency.type) ? "" : "disabled") + " >" + $.t("claim") + "</a> " +
@@ -927,6 +928,43 @@ var NRS = (function(NRS, $, undefined) {
 			};
 		}
 	};
+
+   $("#currency_distribution_modal").on("show.bs.modal", function(e) {
+  		var $invoker = $(e.relatedTarget);
+
+  		var code = $invoker.data("code");
+      var currency;
+      NRS.sendRequest("getCurrency", {
+         "code": code
+      }, function(response) {
+         currency = response;
+      }, false);
+  		NRS.sendRequest("getCurrencyAccounts", {
+  			"currency": currency.currency
+  		}, function(response) {
+  			var rows = "";
+
+  			if (response.accountCurrencies) {
+  				response.accountCurrencies.sort(function(a, b) {
+  					return new BigInteger(b.units).compareTo(new BigInteger(a.units));
+  				});
+
+  				for (var i = 0; i < response.accountCurrencies.length; i++) {
+  					var account = response.accountCurrencies[i];
+  					var percentageCurrency = NRS.calculatePercentage(account.units, currency.currentSupply);
+  					rows += "<tr><td><a href='#' data-user='" + NRS.getAccountFormatted(account, "account") + "' class='user_info'>" + (account.account == currency.account ? "Currency Issuer" : NRS.getAccountTitle(account, "account")) + "</a></td><td>" + NRS.formatQuantity(account.units, currency.decimals) + "</td><td>" + percentageCurrency + "%</td></tr>";
+  				}
+  			}
+
+  			$("#currency_distribution_table tbody").empty().append(rows);
+  			NRS.dataLoadFinished($("#currency_distribution_table"));
+  		});
+  	});
+
+  	$("#currency_distribution_modal").on("hidden.bs.modal", function(e) {
+  		$("#currency_distribution_table tbody").empty();
+  		$("#currency_distribution_table").parent().addClass("data-loading");
+  	});
 
 	/* TRANSFER CURRENCY FORM */
 	NRS.forms.transferCurrency = function($modal) {

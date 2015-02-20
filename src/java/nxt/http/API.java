@@ -22,6 +22,7 @@ import org.eclipse.jetty.servlets.CrossOriginFilter;
 import org.eclipse.jetty.servlets.GzipFilter;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 
+import javax.servlet.http.HttpServletRequest;
 import java.math.BigInteger;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -31,6 +32,9 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import static nxt.http.JSONResponses.INCORRECT_ADMIN_PASSWORD;
+import static nxt.http.JSONResponses.NO_PASSWORD_IN_CONFIG;
 
 public final class API {
 
@@ -84,7 +88,7 @@ public final class API {
                 https_config.addCustomizer(new SecureRequestCustomizer());
                 SslContextFactory sslContextFactory = new SslContextFactory();
                 sslContextFactory.setKeyStorePath(Nxt.getStringProperty("nxt.keyStorePath"));
-                sslContextFactory.setKeyStorePassword(Nxt.getStringProperty("nxt.keyStorePassword"));
+                sslContextFactory.setKeyStorePassword(Nxt.getStringProperty("nxt.keyStorePassword", null, true));
                 sslContextFactory.setExcludeCipherSuites("SSL_RSA_WITH_DES_CBC_SHA", "SSL_DHE_RSA_WITH_DES_CBC_SHA",
                         "SSL_DHE_DSS_WITH_DES_CBC_SHA", "SSL_RSA_EXPORT_WITH_RC4_40_MD5", "SSL_RSA_EXPORT_WITH_DES40_CBC_SHA",
                         "SSL_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA", "SSL_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA");
@@ -181,6 +185,17 @@ public final class API {
             } catch (Exception e) {
                 Logger.logShutdownMessage("Failed to stop API server", e);
             }
+        }
+    }
+
+    static void verifyPassword(HttpServletRequest req) throws ParameterException {
+        if (API.disableAdminPassword) {
+            return;
+        }
+        if (API.adminPassword.isEmpty()) {
+            throw new ParameterException(NO_PASSWORD_IN_CONFIG);
+        } else if (!API.adminPassword.equals(req.getParameter("adminPassword"))) {
+            throw new ParameterException(INCORRECT_ADMIN_PASSWORD);
         }
     }
 

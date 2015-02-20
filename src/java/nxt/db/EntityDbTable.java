@@ -32,9 +32,13 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
         return defaultSort;
     }
 
-    public final void checkAvailable(int height) {
+    protected void clearCache() {
+        db.getCache(table).clear();
+    }
+
+    public void checkAvailable(int height) {
         if (multiversion && height < Nxt.getBlockchainProcessor().getMinRollbackHeight()) {
-            throw new IllegalArgumentException("Historical data as of height " + height +" not available, set nxt.trimDerivedTables=false and re-scan");
+            throw new IllegalArgumentException("Historical data as of height " + height +" not available.");
         }
     }
 
@@ -116,6 +120,9 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
                 t = (T) db.getCache(table).get(dbKey);
             }
             if (t == null) {
+                if (db.isInTransaction() && rs.getInt("height") > Nxt.getBlockchain().getHeight() && !"public_key".equals(table)) {
+                    throw new RuntimeException("Table " + table + " is at height " + rs.getInt("height") + " while blockchain is at " + Nxt.getBlockchain().getHeight());
+                }
                 t = load(con, rs);
                 if (doCache) {
                     db.getCache(table).put(dbKey, t);
@@ -369,7 +376,7 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     @Override
-    public final void truncate() {
+    public void truncate() {
         super.truncate();
         db.getCache(table).clear();
     }

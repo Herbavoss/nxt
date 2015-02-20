@@ -197,7 +197,7 @@ final class TransactionProcessorImpl implements TransactionProcessor {
                     if (peer == null) {
                         return;
                     }
-                    JSONObject response = peer.send(getUnconfirmedTransactionsRequest);
+                    JSONObject response = peer.send(getUnconfirmedTransactionsRequest, 10 * 1024 * 1024);
                     if (response == null) {
                         return;
                     }
@@ -232,7 +232,7 @@ final class TransactionProcessorImpl implements TransactionProcessor {
                     try (DbIterator<UnconfirmedTransaction> oldNonBroadcastedTransactions = getAllUnconfirmedTransactions()) {
                         for (UnconfirmedTransaction unconfirmedTransaction : oldNonBroadcastedTransactions) {
                             if (unconfirmedTransaction.getTransaction().isUnconfirmedDuplicate(unconfirmedDuplicates)) {
-                                Logger.logErrorMessage("Duplicate unconfirmed transaction " + unconfirmedTransaction.getTransaction().getJSONObject().toString());
+                                Logger.logDebugMessage("Skipping duplicate unconfirmed transaction " + unconfirmedTransaction.getTransaction().getJSONObject().toString());
                             } else if (enableTransactionRebroadcasting) {
                                 broadcastedTransactions.add(unconfirmedTransaction.getTransaction());
                             }
@@ -437,7 +437,7 @@ final class TransactionProcessorImpl implements TransactionProcessor {
         List<TransactionImpl> receivedTransactions = new ArrayList<>();
         List<TransactionImpl> sendToPeersTransactions = new ArrayList<>();
         List<TransactionImpl> addedUnconfirmedTransactions = new ArrayList<>();
-        boolean invalidTransactionsFound = false;
+        List<Exception> exceptions = new ArrayList<>();
         for (Object transactionData : transactionsData) {
             try {
                 TransactionImpl transaction = parseTransaction((JSONObject) transactionData);
@@ -459,7 +459,7 @@ final class TransactionProcessorImpl implements TransactionProcessor {
             } catch (NxtException.NotCurrentlyValidException ignore) {
             } catch (NxtException.ValidationException|RuntimeException e) {
                 Logger.logDebugMessage(String.format("Invalid transaction from peer: %s", ((JSONObject) transactionData).toJSONString()), e);
-                invalidTransactionsFound = true;
+                exceptions.add(e);
             }
         }
         if (sendToPeersTransactions.size() > 0) {
@@ -471,15 +471,15 @@ final class TransactionProcessorImpl implements TransactionProcessor {
         for (TransactionImpl transaction : receivedTransactions) {
             broadcastedTransactions.remove(transaction);
         }
-        if (invalidTransactionsFound) {
-            throw new NxtException.NotValidException("Peer sends invalid transactions");
+        if (!exceptions.isEmpty()) {
+            throw new NxtException.NotValidException("Peer sends invalid transactions: " + exceptions.toString());
         }
     }
 
     private void processTransaction(UnconfirmedTransaction unconfirmedTransaction) throws NxtException.ValidationException {
         TransactionImpl transaction = unconfirmedTransaction.getTransaction();
         int curTime = Nxt.getEpochTime();
-        if (transaction.getTimestamp() > curTime + 15 || transaction.getDeadline() > 1440 || transaction.getExpiration() < curTime) {
+        if (transaction.getTimestamp() > curTime + Constants.MAX_TIMEDRIFT || transaction.getDeadline() > 1440 || transaction.getExpiration() < curTime) {
             throw new NxtException.NotCurrentlyValidException("Invalid transaction timestamp");
         }
         if (transaction.getVersion() < 1) {
