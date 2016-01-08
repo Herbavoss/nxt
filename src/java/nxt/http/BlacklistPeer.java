@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.NxtException;
@@ -29,11 +45,11 @@ public class BlacklistPeer extends APIRequestHandler {
         if (peerAddress == null) {
             return MISSING_PEER;
         }
-        Peer peer = Peers.getPeer(peerAddress);
+        Peer peer = Peers.findOrCreatePeer(peerAddress, true);
         if (peer == null) {
-            //maybe add as new peer?
             return UNKNOWN_PEER;
         } else {
+            Peers.addPeer(peer);
             peer.blacklist("Manual blacklist");
             response.put("done", true);
         }
@@ -42,7 +58,23 @@ public class BlacklistPeer extends APIRequestHandler {
     }
 
     @Override
+    final boolean requirePost() {
+        return true;
+    }
+
+    @Override
     boolean requirePassword() {
         return true;
     }
+
+    @Override
+    boolean allowRequiredBlockParameters() {
+        return false;
+    }
+
+    @Override
+    boolean requireBlockchain() {
+        return false;
+    }
+
 }

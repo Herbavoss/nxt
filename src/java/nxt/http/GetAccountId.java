@@ -1,14 +1,27 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.Account;
-import nxt.crypto.Crypto;
 import nxt.util.Convert;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONStreamAware;
 
 import javax.servlet.http.HttpServletRequest;
-
-import static nxt.http.JSONResponses.MISSING_SECRET_PHRASE_OR_PUBLIC_KEY;
 
 public final class GetAccountId extends APIServlet.APIRequestHandler {
 
@@ -19,31 +32,25 @@ public final class GetAccountId extends APIServlet.APIRequestHandler {
     }
 
     @Override
-    JSONStreamAware processRequest(HttpServletRequest req) {
+    JSONStreamAware processRequest(HttpServletRequest req) throws ParameterException {
 
-        long accountId;
-        String secretPhrase = Convert.emptyToNull(req.getParameter("secretPhrase"));
-        String publicKeyString = Convert.emptyToNull(req.getParameter("publicKey"));
-        if (secretPhrase != null) {
-            byte[] publicKey = Crypto.getPublicKey(secretPhrase);
-            accountId = Account.getId(publicKey);
-            publicKeyString = Convert.toHexString(publicKey);
-        } else if (publicKeyString != null) {
-            accountId = Account.getId(Convert.parseHexString(publicKeyString));
-        } else {
-            return MISSING_SECRET_PHRASE_OR_PUBLIC_KEY;
-        }
-
+        byte[] publicKey = ParameterParser.getPublicKey(req);
+        long accountId = Account.getId(publicKey);
         JSONObject response = new JSONObject();
         JSONData.putAccount(response, "account", accountId);
-        response.put("publicKey", publicKeyString);
+        response.put("publicKey", Convert.toHexString(publicKey));
 
         return response;
     }
 
     @Override
-    boolean requirePost() {
-        return true;
+    final boolean allowRequiredBlockParameters() {
+        return false;
+    }
+
+    @Override
+    final boolean requireBlockchain() {
+        return false;
     }
 
 }

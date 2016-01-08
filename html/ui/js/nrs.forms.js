@@ -1,7 +1,23 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 /**
  * @depends {nrs.js}
  */
-var NRS = (function(NRS, $, undefined) {
+var NRS = (function(NRS, $) {
 	NRS.confirmedFormWarning = false;
 
 	NRS.forms = {};
@@ -17,9 +33,32 @@ var NRS = (function(NRS, $, undefined) {
 		}
 	});
 
-	$(".modal button.btn-primary:not([data-dismiss=modal]):not([data-ignore=true])").click(function() {
+	$(".modal button.btn-primary:not([data-dismiss=modal]):not([data-ignore=true]),button.btn-calculate-fee").click(function() {
 		NRS.submitForm($(this).closest(".modal"), $(this));
 	});
+
+	$(".modal input,select,textarea").change(function() {
+        var id = $(this).attr('id');
+        var modal = $(this).closest(".modal");
+		if (!modal) {
+			return;
+		}
+		var feeFieldId = modal.attr('id');
+		if (!feeFieldId) {
+			// Not a modal dialog with fee calculation widget
+			return;
+		}
+        feeFieldId = feeFieldId.replace('_modal', '') + "_fee";
+        if (id == feeFieldId) {
+            return;
+        }
+        var fee = $("#" + feeFieldId);
+        if (fee.val() == "") {
+            return;
+        }
+        var recalcIndicator = $("#" + modal.attr('id').replace('_modal', '') + "_recalc");
+        recalcIndicator.show();
+    });
 
 	function getSuccessMessage(requestType) {
 		var ignore = ["asset_exchange_change_group_name", "asset_exchange_group", "add_contact", "update_contact", "delete_contact",
@@ -81,7 +120,7 @@ var NRS = (function(NRS, $, undefined) {
 			"message": data.message,
 			"note_to_self": data.note_to_self
 		};
-
+        var encrypted;
 		if (data.add_message && data.message) {
 			if (data.encrypt_message) {
 				try {
@@ -98,18 +137,26 @@ var NRS = (function(NRS, $, undefined) {
 						options.publicKey = data.recipientPublicKey;
 					}
 
-					var encrypted = NRS.encryptNote(data.message, options, data.secretPhrase);
-
-					data.encryptedMessageData = encrypted.message;
-					data.encryptedMessageNonce = encrypted.nonce;
+                    if (data.doNotSign) {
+                        data.messageToEncrypt = data.message;
+                    } else {
+                        encrypted = NRS.encryptNote(data.message, options, data.secretPhrase);
+                        data.encryptedMessageData = encrypted.message;
+                        data.encryptedMessageNonce = encrypted.nonce;
+                    }
 					data.messageToEncryptIsText = "true";
-
+					if (!data.permanent_message) {
+						data.encryptedMessageIsPrunable = "true";
+					}
 					delete data.message;
 				} catch (err) {
 					throw err;
 				}
 			} else {
 				data.messageIsText = "true";
+				if (!data.permanent_message && converters.stringToByteArray(data.message).length >= NRS.constants.MIN_PRUNABLE_MESSAGE_LENGTH) {
+					data.messageIsPrunable = "true";
+				}
 			}
 		} else {
 			delete data.message;
@@ -117,16 +164,17 @@ var NRS = (function(NRS, $, undefined) {
 
 		if (data.add_note_to_self && data.note_to_self) {
 			try {
-				var options = {};
+				if (data.doNotSign) {
+                    data.messageToEncryptToSelf = data.note_to_self;
+                } else {
+                    encrypted = NRS.encryptNote(data.note_to_self, {
+                        "publicKey": converters.hexStringToByteArray(NRS.generatePublicKey(data.secretPhrase))
+                    }, data.secretPhrase);
 
-				var encrypted = NRS.encryptNote(data.note_to_self, {
-					"publicKey": converters.hexStringToByteArray(NRS.generatePublicKey(data.secretPhrase))
-				}, data.secretPhrase);
-
-				data.encryptToSelfMessageData = encrypted.message;
-				data.encryptToSelfMessageNonce = encrypted.nonce;
+                    data.encryptToSelfMessageData = encrypted.message;
+                    data.encryptToSelfMessageNonce = encrypted.nonce;
+                }
 				data.messageToEncryptToSelfIsText = "true";
-
 				delete data.note_to_self;
 			} catch (err) {
 				throw err;
@@ -140,26 +188,27 @@ var NRS = (function(NRS, $, undefined) {
 		delete data.add_note_to_self;
 
 		return data;
-	}
+	};
 
-	NRS.submitForm = function($modal, $btn) {
+    NRS.submitForm = function($modal, $btn) {
 		if (!$btn) {
 			$btn = $modal.find("button.btn-primary:not([data-dismiss=modal])");
 		}
 
-		var $modal = $btn.closest(".modal");
+		$modal = $btn.closest(".modal");
 
 		$modal.modal("lock");
 		$modal.find("button").prop("disabled", true);
 		$btn.button("loading");
 
+        var $form;
 		if ($btn.data("form")) {
-			var $form = $modal.find("form#" + $btn.data("form"));
+			$form = $modal.find("form#" + $btn.data("form"));
 			if (!$form.length) {
 				$form = $modal.find("form:first");
 			}
 		} else {
-			var $form = $modal.find("form:first");
+			$form = $modal.find("form:first");
 		}
 
 		var requestType = $form.find("input[name=request_type]").val();
@@ -180,21 +229,22 @@ var NRS = (function(NRS, $, undefined) {
 		}
 
 		var originalRequestType = requestType;
-
-		if (NRS.downloadingBlockchain) {
-			$form.find(".error_message").html($.t("error_blockchain_downloading")).show();
-			if (formErrorFunction) {
-				formErrorFunction();
+        if (NRS.isRequireBlockchain(requestType)) {
+			if (NRS.downloadingBlockchain) {
+				$form.find(".error_message").html($.t("error_blockchain_downloading")).show();
+				if (formErrorFunction) {
+					formErrorFunction();
+				}
+				NRS.unlockForm($modal, $btn);
+				return;
+			} else if (NRS.state.isScanning) {
+				$form.find(".error_message").html($.t("error_form_blockchain_rescanning")).show();
+				if (formErrorFunction) {
+					formErrorFunction();
+				}
+				NRS.unlockForm($modal, $btn);
+				return;
 			}
-			NRS.unlockForm($modal, $btn);
-			return;
-		} else if (NRS.state.isScanning) {
-			$form.find(".error_message").html($.t("error_form_blockchain_rescanning")).show();
-			if (formErrorFunction) {
-				formErrorFunction();
-			}
-			NRS.unlockForm($modal, $btn);
-			return;
 		}
 
 		var invalidElement = false;
@@ -297,6 +347,16 @@ var NRS = (function(NRS, $, undefined) {
 		if (!data) {
 			data = NRS.getFormData($form);
 		}
+        if ($btn.hasClass("btn-calculate-fee")) {
+            data.calculateFee = true;
+            data.feeNXT = "0";
+            $form.find(".error_message").html("").hide();
+        } else {
+            delete data.calculateFee;
+            if (!data.feeNXT) {
+                data.feeNXT = "0";
+            }
+        }
 
 		if (data.recipient) {
 			data.recipient = $.trim(data.recipient);
@@ -363,16 +423,16 @@ var NRS = (function(NRS, $, undefined) {
 					if (regexParts[1].slice(-1) != "$") {
 						regexParts[1] = regexParts[1] + "$";
 					}
-
+                    var regexp;
 					if (regexParts[2].indexOf("i") !== -1) {
-						var regexp = new RegExp(regexParts[1], "i");
+						regexp = new RegExp(regexParts[1], "i");
 					} else {
-						var regexp = new RegExp(regexParts[1]);
+						regexp = new RegExp(regexParts[1]);
 					}
 
 					if (!regexp.test(data.message)) {
 						var regexType;
-						var errorMessage;
+						errorMessage = "";
 						var lengthRequirement = strippedRegex.match(/\{(.*)\}/);
 
 						if (lengthRequirement) {
@@ -388,8 +448,6 @@ var NRS = (function(NRS, $, undefined) {
 						}
 
 						if (lengthRequirement) {
-							var minLength, maxLength, requiredLength;
-
 							if (lengthRequirement[1].indexOf(",") != -1) {
 								lengthRequirement = lengthRequirement[1].split(",");
 								var minLength = parseInt(lengthRequirement[0], 10);
@@ -439,11 +497,13 @@ var NRS = (function(NRS, $, undefined) {
 			data.deadline = String(data.deadline * 60); //hours to minutes
 		}
 
-		if ("secretPhrase" in data && !data.secretPhrase.length && !NRS.rememberPassword) {
+        if ("secretPhrase" in data && !data.secretPhrase.length && !NRS.rememberPassword &&
+                !(data.calculateFee && NRS.accountInfo.publicKey)) {
 			$form.find(".error_message").html($.t("error_passphrase_required")).show();
 			if (formErrorFunction) {
 				formErrorFunction(false, data);
 			}
+            $("#" + $modal.attr('id').replace('_modal', '') + "_password").focus();
 			NRS.unlockForm($modal, $btn);
 			return;
 		}
@@ -498,17 +558,66 @@ var NRS = (function(NRS, $, undefined) {
 					return;
 				}
 			}
+
+			if ("decimals" in data) {
+                try {
+                    var decimals = parseInt(data.decimals);
+				} catch (err) {
+                    decimals = 0;
+				}
+
+				if (decimals < 2 || decimals > 6) {
+					NRS.showedFormWarning = true;
+                    var entity = (requestType == 'issueCurrency' ? 'currency' : 'asset');
+					$form.find(".error_message").html($.t("error_decimal_positions_warning", {
+                        "entity": entity
+                    })).show();
+					if (formErrorFunction) {
+						formErrorFunction(false, data);
+					}
+					NRS.unlockForm($modal, $btn);
+					return;
+				}
+			}
+
+			var convertNXTFields = ["phasingQuorumNXT", "phasingMinBalanceNXT"];
+			$.each(convertNXTFields, function(key, field) {
+				if (field in data) {
+					try {
+						NRS.convertToNQT(data[field]);
+					} catch (err) {
+						$form.find(".error_message").html(String(err).escapeHTML()).show();
+						if (formErrorFunction) {
+							formErrorFunction(false, data);
+						}
+						NRS.unlockForm($modal, $btn);
+					}
+				}
+			});
 		}
 
-		if (data.doNotBroadcast) {
+		if (data.doNotBroadcast || data.calculateFee) {
 			data.broadcast = "false";
-			delete data.doNotBroadcast;
+            if (data.calculateFee) {
+                if (NRS.accountInfo.publicKey) {
+                    data.publicKey = NRS.accountInfo.publicKey;
+                    delete data.secretPhrase;
+                }
+            }
+            if (data.doNotBroadcast) {
+                delete data.doNotBroadcast;
+            }
 		}
 
 		NRS.sendRequest(requestType, data, function(response) {
 			//todo check again.. response.error
+            var formCompleteFunction;
 			if (response.fullHash) {
-				NRS.unlockForm($modal, $btn);
+                NRS.unlockForm($modal, $btn);
+                if (data.calculateFee) {
+                    updateFee($modal, response.transactionJSON.feeNQT);
+                    return;
+                }
 
 				if (!$modal.hasClass("modal-no-hide")) {
 					$modal.modal("hide");
@@ -520,9 +629,9 @@ var NRS = (function(NRS, $, undefined) {
 					});
 				}
 
-				var formCompleteFunction = NRS["forms"][originalRequestType + "Complete"];
+				formCompleteFunction = NRS["forms"][originalRequestType + "Complete"];
 
-				if (requestType != "parseTransaction") {
+				if (requestType != "parseTransaction" && requestType != "calculateFullHash") {
 					if (typeof formCompleteFunction == "function") {
 						data.requestType = requestType;
 
@@ -557,10 +666,14 @@ var NRS = (function(NRS, $, undefined) {
 
 				NRS.unlockForm($modal, $btn);
 			} else {
+                if (data.calculateFee) {
+                    NRS.unlockForm($modal, $btn, false);
+                    updateFee($modal, response.transactionJSON.feeNQT);
+                    return;
+                }
 				var sentToFunction = false;
-
 				if (!errorMessage) {
-					var formCompleteFunction = NRS["forms"][originalRequestType + "Complete"];
+					formCompleteFunction = NRS["forms"][originalRequestType + "Complete"];
 
 					if (typeof formCompleteFunction == 'function') {
 						sentToFunction = true;
@@ -576,7 +689,6 @@ var NRS = (function(NRS, $, undefined) {
 						errorMessage = $.t("error_unknown");
 					}
 				}
-
 				if (!sentToFunction) {
 					NRS.unlockForm($modal, $btn, true);
 
@@ -586,7 +698,7 @@ var NRS = (function(NRS, $, undefined) {
 				}
 			}
 		});
-	}
+	};
 
 	NRS.unlockForm = function($modal, $btn, hide) {
 		$modal.find("button").prop("disabled", false);
@@ -597,7 +709,14 @@ var NRS = (function(NRS, $, undefined) {
 		if (hide) {
 			$modal.modal("hide");
 		}
-	}
+	};
+
+    function updateFee(modal, feeNQT) {
+        var fee = $("#" + modal.attr('id').replace('_modal', '') + "_fee");
+        fee.val(NRS.convertToNXT(feeNQT));
+        var recalcIndicator = $("#" + modal.attr('id').replace('_modal', '') + "_recalc");
+        recalcIndicator.hide();
+    }
 
 	return NRS;
 }(NRS || {}, jQuery));

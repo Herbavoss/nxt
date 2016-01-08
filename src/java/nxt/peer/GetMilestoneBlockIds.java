@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.peer;
 
 import nxt.Block;
@@ -62,7 +78,7 @@ final class GetMilestoneBlockIds extends PeerServlet.PeerRequestHandler {
             blockId = Nxt.getBlockchain().getBlockIdAtHeight(height);
 
             while (height > 0 && limit-- > 0) {
-                milestoneBlockIds.add(Convert.toUnsignedLong(blockId));
+                milestoneBlockIds.add(Long.toUnsignedString(blockId));
                 blockId = Nxt.getBlockchain().getBlockIdAtHeight(height);
                 height = height - jump;
             }
@@ -70,10 +86,15 @@ final class GetMilestoneBlockIds extends PeerServlet.PeerRequestHandler {
 
         } catch (RuntimeException e) {
             Logger.logDebugMessage(e.toString());
-            response.put("error", e.toString());
+            return PeerServlet.error(e);
         }
 
         return response;
+    }
+
+    @Override
+    boolean rejectWhileDownloading() {
+        return true;
     }
 
 }

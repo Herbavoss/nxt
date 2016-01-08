@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.Account;
@@ -48,17 +64,17 @@ public final class DGSDelivery extends CreateTransaction {
         }
         if (discountNQT < 0
                 || discountNQT > Constants.MAX_BALANCE_NQT
-                || discountNQT > Convert.safeMultiply(purchase.getPriceNQT(), purchase.getQuantity())) {
+                || discountNQT > Math.multiplyExact(purchase.getPriceNQT(), (long) purchase.getQuantity())) {
             return INCORRECT_DGS_DISCOUNT;
         }
 
         Account buyerAccount = Account.getAccount(purchase.getBuyerId());
         boolean goodsIsText = !"false".equalsIgnoreCase(req.getParameter("goodsIsText"));
-        EncryptedData encryptedGoods = ParameterParser.getEncryptedGoods(req);
+        EncryptedData encryptedGoods = ParameterParser.getEncryptedData(req, "goods");
+        byte[] goodsBytes = null;
+        boolean broadcast = !"false".equalsIgnoreCase(req.getParameter("broadcast"));
 
         if (encryptedGoods == null) {
-            String secretPhrase = ParameterParser.getSecretPhrase(req);
-            byte[] goodsBytes;
             try {
                 String plainGoods = Convert.nullToEmpty(req.getParameter("goodsToEncrypt"));
                 if (plainGoods.length() == 0) {
@@ -68,10 +84,15 @@ public final class DGSDelivery extends CreateTransaction {
             } catch (RuntimeException e) {
                 return INCORRECT_DGS_GOODS;
             }
-            encryptedGoods = buyerAccount.encryptTo(goodsBytes, secretPhrase);
+            String secretPhrase = ParameterParser.getSecretPhrase(req, broadcast);
+            if (secretPhrase != null) {
+                encryptedGoods = buyerAccount.encryptTo(goodsBytes, secretPhrase, true);
+            }
         }
 
-        Attachment attachment = new Attachment.DigitalGoodsDelivery(purchase.getId(), encryptedGoods, goodsIsText, discountNQT);
+        Attachment attachment = encryptedGoods == null ?
+                new Attachment.UnencryptedDigitalGoodsDelivery(purchase.getId(), goodsBytes, goodsIsText, discountNQT, buyerAccount.getPublicKey()) :
+                new Attachment.DigitalGoodsDelivery(purchase.getId(), encryptedGoods, goodsIsText, discountNQT);
         return createTransaction(req, sellerAccount, buyerAccount.getId(), 0, attachment);
 
     }

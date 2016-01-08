@@ -1,9 +1,25 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.db.DbClause;
 import nxt.db.DbIterator;
 import nxt.db.DbKey;
-import nxt.db.EntityDbTable;
+import nxt.db.VersionedEntityDbTable;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -21,7 +37,7 @@ public final class Asset {
 
     };
 
-    private static final EntityDbTable<Asset> assetTable = new EntityDbTable<Asset>("asset", assetDbKeyFactory) {
+    private static final VersionedEntityDbTable<Asset> assetTable = new VersionedEntityDbTable<Asset>("asset", assetDbKeyFactory, "name,description") {
 
         @Override
         protected Asset load(Connection con, ResultSet rs) throws SQLException {
@@ -31,6 +47,21 @@ public final class Asset {
         @Override
         protected void save(Connection con, Asset asset) throws SQLException {
             asset.save(con);
+        }
+
+        @Override
+        public void trim(int height) {
+            super.trim(Math.max(0, height - Constants.MAX_DIVIDEND_PAYMENT_ROLLBACK));
+        }
+
+        @Override
+        public void checkAvailable(int height) {
+            if (height + Constants.MAX_DIVIDEND_PAYMENT_ROLLBACK < Nxt.getBlockchainProcessor().getMinRollbackHeight()) {
+                throw new IllegalArgumentException("Historical data as of height " + height +" not available.");
+            }
+            if (height > Nxt.getBlockchain().getHeight()) {
+                throw new IllegalArgumentException("Height " + height + " exceeds blockchain height " + Nxt.getBlockchain().getHeight());
+            }
         }
 
     };
@@ -47,16 +78,27 @@ public final class Asset {
         return assetTable.get(assetDbKeyFactory.newKey(id));
     }
 
+    public static Asset getAsset(long id, int height) {
+        return assetTable.get(assetDbKeyFactory.newKey(id), height);
+    }
+
     public static DbIterator<Asset> getAssetsIssuedBy(long accountId, int from, int to) {
         return assetTable.getManyBy(new DbClause.LongClause("account_id", accountId), from, to);
     }
 
     public static DbIterator<Asset> searchAssets(String query, int from, int to) {
-        return assetTable.search(query, DbClause.EMPTY_CLAUSE, from, to, " ORDER BY ft.score DESC, asset.height DESC ");
+        return assetTable.search(query, DbClause.EMPTY_CLAUSE, from, to, " ORDER BY ft.score DESC ");
     }
 
     static void addAsset(Transaction transaction, Attachment.ColoredCoinsAssetIssuance attachment) {
         assetTable.insert(new Asset(transaction, attachment));
+    }
+
+    static void deleteAsset(Transaction transaction, long assetId, long quantityQNT) {
+        Asset asset = getAsset(assetId);
+        asset.quantityQNT = Math.max(0, asset.quantityQNT - quantityQNT);
+        assetTable.insert(asset);
+        AssetDelete.addAssetDelete(transaction, assetId, quantityQNT);
     }
 
     static void init() {}
@@ -67,7 +109,8 @@ public final class Asset {
     private final long accountId;
     private final String name;
     private final String description;
-    private final long quantityQNT;
+    private final long initialQuantityQNT;
+    private long quantityQNT;
     private final byte decimals;
 
     private Asset(Transaction transaction, Attachment.ColoredCoinsAssetIssuance attachment) {
@@ -77,6 +120,7 @@ public final class Asset {
         this.name = attachment.getName();
         this.description = attachment.getDescription();
         this.quantityQNT = attachment.getQuantityQNT();
+        this.initialQuantityQNT = this.quantityQNT;
         this.decimals = attachment.getDecimals();
     }
 
@@ -86,20 +130,24 @@ public final class Asset {
         this.accountId = rs.getLong("account_id");
         this.name = rs.getString("name");
         this.description = rs.getString("description");
+        this.initialQuantityQNT = rs.getLong("initial_quantity");
         this.quantityQNT = rs.getLong("quantity");
         this.decimals = rs.getByte("decimals");
     }
 
     private void save(Connection con) throws SQLException {
-        try (PreparedStatement pstmt = con.prepareStatement("INSERT INTO asset (id, account_id, name, "
-                + "description, quantity, decimals, height) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+        try (PreparedStatement pstmt = con.prepareStatement("MERGE INTO asset "
+                + "(id, account_id, name, description, initial_quantity, quantity, decimals, height, latest) "
+                + "KEY(id, height) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)")) {
             int i = 0;
-            pstmt.setLong(++i, this.getId());
-            pstmt.setLong(++i, this.getAccountId());
-            pstmt.setString(++i, this.getName());
-            pstmt.setString(++i, this.getDescription());
-            pstmt.setLong(++i, this.getQuantityQNT());
-            pstmt.setByte(++i, this.getDecimals());
+            pstmt.setLong(++i, this.assetId);
+            pstmt.setLong(++i, this.accountId);
+            pstmt.setString(++i, this.name);
+            pstmt.setString(++i, this.description);
+            pstmt.setLong(++i, this.initialQuantityQNT);
+            pstmt.setLong(++i, this.quantityQNT);
+            pstmt.setByte(++i, this.decimals);
             pstmt.setInt(++i, Nxt.getBlockchain().getHeight());
             pstmt.executeUpdate();
         }
@@ -121,6 +169,10 @@ public final class Asset {
         return description;
     }
 
+    public long getInitialQuantityQNT() {
+        return initialQuantityQNT;
+    }
+
     public long getQuantityQNT() {
         return quantityQNT;
     }
@@ -134,9 +186,6 @@ public final class Asset {
     }
 
     public DbIterator<Account.AccountAsset> getAccounts(int height, int from, int to) {
-        if (height < 0) {
-            return getAccounts(from, to);
-        }
         return Account.getAssetAccounts(this.assetId, height, from, to);
     }
 

@@ -1,6 +1,22 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
-import nxt.util.Convert;
+import nxt.AccountLedger.LedgerEvent;
 import org.json.simple.JSONObject;
 
 import java.nio.ByteBuffer;
@@ -17,13 +33,6 @@ public abstract class MonetarySystem extends TransactionType {
     private static final byte SUBTYPE_MONETARY_SYSTEM_EXCHANGE_SELL = 6;
     private static final byte SUBTYPE_MONETARY_SYSTEM_CURRENCY_MINTING = 7;
     private static final byte SUBTYPE_MONETARY_SYSTEM_CURRENCY_DELETION = 8;
-
-    private static final Fee NEXT_5LETTER_CURRENCY_ISSUANCE_FEE = new Fee(40 * Constants.ONE_NXT, 0);
-    private static final Fee NEXT_4LETTER_CURRENCY_ISSUANCE_FEE = new Fee(1000 * Constants.ONE_NXT, 0);
-    private static final Fee NEXT_3LETTER_CURRENCY_ISSUANCE_FEE = new Fee(25000 * Constants.ONE_NXT, 0);
-    private static final Fee BASELINE_5LETTER_CURRENCY_ISSUANCE_FEE = new Fee(40 * Constants.ONE_NXT, 0);
-    private static final Fee BASELINE_4LETTER_CURRENCY_ISSUANCE_FEE = new Fee(1000 * Constants.ONE_NXT, 0);
-    private static final Fee BASELINE_3LETTER_CURRENCY_ISSUANCE_FEE = new Fee(25000 * Constants.ONE_NXT, 0);
 
     static TransactionType findTransactionType(byte subtype) {
         switch (subtype) {
@@ -58,7 +67,7 @@ public abstract class MonetarySystem extends TransactionType {
     }
 
     @Override
-    boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Boolean>> duplicates) {
+    boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
         Attachment.MonetarySystemAttachment attachment = (Attachment.MonetarySystemAttachment) transaction.getAttachment();
         Currency currency = Currency.getCurrency(attachment.getCurrencyId());
         String nameLower = currency.getName().toLowerCase();
@@ -70,7 +79,16 @@ public abstract class MonetarySystem extends TransactionType {
         return isDuplicate;
     }
 
+    @Override
+    public final boolean isPhasingSafe() {
+        return false;
+    }
+
     public static final TransactionType CURRENCY_ISSUANCE = new MonetarySystem() {
+
+        private final Fee FIVE_LETTER_CURRENCY_ISSUANCE_FEE = new Fee.ConstantFee(40 * Constants.ONE_NXT);
+        private final Fee FOUR_LETTER_CURRENCY_ISSUANCE_FEE = new Fee.ConstantFee(1000 * Constants.ONE_NXT);
+        private final Fee THREE_LETTER_CURRENCY_ISSUANCE_FEE = new Fee.ConstantFee(25000 * Constants.ONE_NXT);
 
         @Override
         public byte getSubtype() {
@@ -78,41 +96,39 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
-        public Fee getBaselineFee(TransactionImpl transaction) throws NxtException.NotValidException {
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_ISSUANCE;
+        }
+
+        @Override
+        public String getName() {
+            return "CurrencyIssuance";
+        }
+
+        @Override
+        Fee getBaselineFee(Transaction transaction) {
             Attachment.MonetarySystemCurrencyIssuance attachment = (Attachment.MonetarySystemCurrencyIssuance) transaction.getAttachment();
-            if (Currency.getCurrencyByCode(attachment.getCode()) != null || Currency.getCurrencyByCode(attachment.getName().toUpperCase()) != null
+            if (Currency.getCurrencyByCode(attachment.getCode()) != null || Currency.getCurrencyByCode(attachment.getName()) != null
                     || Currency.getCurrencyByName(attachment.getName()) != null || Currency.getCurrencyByName(attachment.getCode()) != null) {
-                return BASELINE_5LETTER_CURRENCY_ISSUANCE_FEE;
+                return FIVE_LETTER_CURRENCY_ISSUANCE_FEE;
             }
             switch (Math.min(attachment.getCode().length(), attachment.getName().length())) {
                 case 3:
-                    return BASELINE_3LETTER_CURRENCY_ISSUANCE_FEE;
+                    return THREE_LETTER_CURRENCY_ISSUANCE_FEE;
                 case 4:
-                    return BASELINE_4LETTER_CURRENCY_ISSUANCE_FEE;
+                    return FOUR_LETTER_CURRENCY_ISSUANCE_FEE;
                 case 5:
-                    return BASELINE_5LETTER_CURRENCY_ISSUANCE_FEE;
+                    return FIVE_LETTER_CURRENCY_ISSUANCE_FEE;
                 default:
-                    throw new NxtException.NotValidException("Invalid currency code length");
+                    // never, invalid code length will be checked and caught later
+                    return THREE_LETTER_CURRENCY_ISSUANCE_FEE;
             }
         }
 
         @Override
-        public Fee getNextFee(TransactionImpl transaction) throws NxtException.NotValidException {
-            Attachment.MonetarySystemCurrencyIssuance attachment = (Attachment.MonetarySystemCurrencyIssuance) transaction.getAttachment();
-            if (Currency.getCurrencyByCode(attachment.getCode()) != null || Currency.getCurrencyByCode(attachment.getName().toUpperCase()) != null
-                    || Currency.getCurrencyByName(attachment.getName()) != null || Currency.getCurrencyByName(attachment.getCode()) != null) {
-                return NEXT_5LETTER_CURRENCY_ISSUANCE_FEE;
-            }
-            switch (Math.min(attachment.getCode().length(), attachment.getName().length())) {
-                case 3:
-                    return NEXT_3LETTER_CURRENCY_ISSUANCE_FEE;
-                case 4:
-                    return NEXT_4LETTER_CURRENCY_ISSUANCE_FEE;
-                case 5:
-                    return NEXT_5LETTER_CURRENCY_ISSUANCE_FEE;
-                default:
-                    throw new NxtException.NotValidException("Invalid currency code length");
-            }
+        long[] getBackFees(Transaction transaction) {
+            long feeNQT = transaction.getFeeNQT();
+            return new long[] {feeNQT * 3 / 10, feeNQT * 2 / 10, feeNQT / 10};
         }
 
         @Override
@@ -126,7 +142,7 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
-        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Boolean>> duplicates) {
+        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
             Attachment.MonetarySystemCurrencyIssuance attachment = (Attachment.MonetarySystemCurrencyIssuance) transaction.getAttachment();
             String nameLower = attachment.getName().toLowerCase();
             String codeLower = attachment.getCode().toLowerCase();
@@ -135,6 +151,12 @@ public abstract class MonetarySystem extends TransactionType {
                 isDuplicate = isDuplicate || TransactionType.isDuplicate(CURRENCY_ISSUANCE, codeLower, duplicates, true);
             }
             return isDuplicate;
+        }
+
+        @Override
+        boolean isBlockDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
+            return Nxt.getBlockchain().getHeight() > Constants.SHUFFLING_BLOCK
+                    && isDuplicate(CURRENCY_ISSUANCE, getName(), duplicates, true);
         }
 
         @Override
@@ -176,8 +198,10 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemCurrencyIssuance attachment = (Attachment.MonetarySystemCurrencyIssuance) transaction.getAttachment();
-            Currency.addCurrency(transaction, attachment);
-            senderAccount.addToCurrencyAndUnconfirmedCurrencyUnits(transaction.getId(), attachment.getInitialSupply());
+            long transactionId = transaction.getId();
+            Currency.addCurrency(getLedgerEvent(), transactionId, transaction, senderAccount, attachment);
+            senderAccount.addToCurrencyAndUnconfirmedCurrencyUnits(getLedgerEvent(), transactionId,
+                    transactionId, attachment.getInitialSupply());
         }
 
         @Override
@@ -192,6 +216,16 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         public byte getSubtype() {
             return SUBTYPE_MONETARY_SYSTEM_RESERVE_INCREASE;
+        }
+
+        @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_RESERVE_INCREASE;
+        }
+
+        @Override
+        public String getName() {
+            return "ReserveIncrease";
         }
 
         @Override
@@ -217,8 +251,9 @@ public abstract class MonetarySystem extends TransactionType {
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemReserveIncrease attachment = (Attachment.MonetarySystemReserveIncrease) transaction.getAttachment();
             Currency currency = Currency.getCurrency(attachment.getCurrencyId());
-            if (senderAccount.getUnconfirmedBalanceNQT() >= Convert.safeMultiply(currency.getReserveSupply(), attachment.getAmountPerUnitNQT())) {
-                senderAccount.addToUnconfirmedBalanceNQT(-Convert.safeMultiply(currency.getReserveSupply(), attachment.getAmountPerUnitNQT()));
+            if (senderAccount.getUnconfirmedBalanceNQT() >= Math.multiplyExact(currency.getReserveSupply(), attachment.getAmountPerUnitNQT())) {
+                senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                        -Math.multiplyExact(currency.getReserveSupply(), attachment.getAmountPerUnitNQT()));
                 return true;
             }
             return false;
@@ -227,13 +262,24 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemReserveIncrease attachment = (Attachment.MonetarySystemReserveIncrease) transaction.getAttachment();
-            senderAccount.addToUnconfirmedBalanceNQT(Convert.safeMultiply(Currency.getCurrency(attachment.getCurrencyId()).getReserveSupply(), attachment.getAmountPerUnitNQT()));
+            long reserveSupply;
+            Currency currency = Currency.getCurrency(attachment.getCurrencyId());
+            if (currency != null) {
+                reserveSupply = currency.getReserveSupply();
+            } else { // currency must have been deleted, get reserve supply from the original issuance transaction
+                Transaction currencyIssuance = Nxt.getBlockchain().getTransaction(attachment.getCurrencyId());
+                Attachment.MonetarySystemCurrencyIssuance currencyIssuanceAttachment = (Attachment.MonetarySystemCurrencyIssuance) currencyIssuance.getAttachment();
+                reserveSupply = currencyIssuanceAttachment.getReserveSupply();
+            }
+            senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                    Math.multiplyExact(reserveSupply, attachment.getAmountPerUnitNQT()));
         }
 
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemReserveIncrease attachment = (Attachment.MonetarySystemReserveIncrease) transaction.getAttachment();
-            Currency.increaseReserve(senderAccount, attachment.getCurrencyId(), attachment.getAmountPerUnitNQT());
+            Currency.increaseReserve(getLedgerEvent(), transaction.getId(), senderAccount, attachment.getCurrencyId(),
+                    attachment.getAmountPerUnitNQT());
         }
 
         @Override
@@ -248,6 +294,16 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         public byte getSubtype() {
             return SUBTYPE_MONETARY_SYSTEM_RESERVE_CLAIM;
+        }
+
+        @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_RESERVE_CLAIM;
+        }
+
+        @Override
+        public String getName() {
+            return "ReserveClaim";
         }
 
         @Override
@@ -273,7 +329,8 @@ public abstract class MonetarySystem extends TransactionType {
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemReserveClaim attachment = (Attachment.MonetarySystemReserveClaim) transaction.getAttachment();
             if (senderAccount.getUnconfirmedCurrencyUnits(attachment.getCurrencyId()) >= attachment.getUnits()) {
-                senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), -attachment.getUnits());
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), -attachment.getUnits());
                 return true;
             }
             return false;
@@ -282,13 +339,18 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemReserveClaim attachment = (Attachment.MonetarySystemReserveClaim) transaction.getAttachment();
-            senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), attachment.getUnits());
+            Currency currency = Currency.getCurrency(attachment.getCurrencyId());
+            if (currency != null) {
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(), attachment.getCurrencyId(),
+                        attachment.getUnits());
+            }
         }
 
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemReserveClaim attachment = (Attachment.MonetarySystemReserveClaim) transaction.getAttachment();
-            Currency.claimReserve(senderAccount, attachment.getCurrencyId(), attachment.getUnits());
+            Currency.claimReserve(getLedgerEvent(), transaction.getId(), senderAccount, attachment.getCurrencyId(),
+                    attachment.getUnits());
         }
 
         @Override
@@ -303,6 +365,16 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         public byte getSubtype() {
             return SUBTYPE_MONETARY_SYSTEM_CURRENCY_TRANSFER;
+        }
+
+        @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_TRANSFER;
+        }
+
+        @Override
+        public String getName() {
+            return "CurrencyTransfer";
         }
 
         @Override
@@ -337,20 +409,26 @@ public abstract class MonetarySystem extends TransactionType {
             if (attachment.getUnits() > senderAccount.getUnconfirmedCurrencyUnits(attachment.getCurrencyId())) {
                 return false;
             }
-            senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), -attachment.getUnits());
+            senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                    attachment.getCurrencyId(), -attachment.getUnits());
             return true;
         }
 
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemCurrencyTransfer attachment = (Attachment.MonetarySystemCurrencyTransfer) transaction.getAttachment();
-            senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), attachment.getUnits());
+            Currency currency = Currency.getCurrency(attachment.getCurrencyId());
+            if (currency != null) {
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), attachment.getUnits());
+            }
         }
 
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemCurrencyTransfer attachment = (Attachment.MonetarySystemCurrencyTransfer) transaction.getAttachment();
-            Currency.transferCurrency(senderAccount, recipientAccount, attachment.getCurrencyId(), attachment.getUnits());
+            Currency.transferCurrency(getLedgerEvent(), transaction.getId(), senderAccount, recipientAccount,
+                    attachment.getCurrencyId(), attachment.getUnits());
             CurrencyTransfer.addTransfer(transaction, attachment);
         }
 
@@ -369,6 +447,16 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_PUBLISH_EXCHANGE_OFFER;
+        }
+
+        @Override
+        public String getName() {
+            return "PublishExchangeOffer";
+        }
+
+        @Override
         Attachment.MonetarySystemPublishExchangeOffer parseAttachment(ByteBuffer buffer, byte transactionVersion) throws NxtException.NotValidException {
             return new Attachment.MonetarySystemPublishExchangeOffer(buffer, transactionVersion);
         }
@@ -383,20 +471,31 @@ public abstract class MonetarySystem extends TransactionType {
             Attachment.MonetarySystemPublishExchangeOffer attachment = (Attachment.MonetarySystemPublishExchangeOffer) transaction.getAttachment();
             if (attachment.getBuyRateNQT() <= 0
                     || attachment.getSellRateNQT() <= 0
-                    || attachment.getBuyRateNQT() > attachment.getSellRateNQT()
-                    || attachment.getTotalBuyLimit() < 0
+                    || attachment.getBuyRateNQT() > attachment.getSellRateNQT()) {
+                throw new NxtException.NotValidException(String.format("Invalid exchange offer, buy rate %d and sell rate %d has to be larger than 0, buy rate cannot be larger than sell rate",
+                        attachment.getBuyRateNQT(), attachment.getSellRateNQT()));
+            }
+            if (attachment.getTotalBuyLimit() < 0
                     || attachment.getTotalSellLimit() < 0
                     || attachment.getInitialBuySupply() < 0
                     || attachment.getInitialSellSupply() < 0
                     || attachment.getExpirationHeight() < 0) {
-                throw new NxtException.NotValidException("Invalid exchange offer: " + attachment.getJSONObject());
+                throw new NxtException.NotValidException("Invalid exchange offer, units and height cannot be negative: " + attachment.getJSONObject());
             }
             if (attachment.getTotalBuyLimit() < attachment.getInitialBuySupply()
-                || attachment.getTotalSellLimit() < attachment.getInitialSellSupply()) {
+                    || attachment.getTotalSellLimit() < attachment.getInitialSellSupply()) {
                 throw new NxtException.NotValidException("Initial supplies must not exceed total limits");
             }
-            if (attachment.getExpirationHeight() <= Nxt.getBlockchain().getHeight()) {
-                throw new NxtException.NotCurrentlyValidException("Expiration height must be after current blockchain height");
+            if (Nxt.getBlockchain().getHeight() > Constants.SHUFFLING_BLOCK) {
+                if (attachment.getTotalBuyLimit() == 0 && attachment.getTotalSellLimit() == 0) {
+                    throw new NxtException.NotCurrentlyValidException("Total buy and sell limits cannot be both 0");
+                }
+                if (attachment.getInitialBuySupply() == 0 && attachment.getInitialSellSupply() == 0) {
+                    throw new NxtException.NotCurrentlyValidException("Initial buy and sell supply cannot be both 0");
+                }
+            }
+            if (attachment.getExpirationHeight() <= attachment.getFinishValidationHeight(transaction)) {
+                throw new NxtException.NotCurrentlyValidException("Expiration height must be after transaction execution height");
             }
             Currency currency = Currency.getCurrency(attachment.getCurrencyId());
             CurrencyType.validate(currency, transaction);
@@ -408,10 +507,12 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemPublishExchangeOffer attachment = (Attachment.MonetarySystemPublishExchangeOffer) transaction.getAttachment();
-            if (senderAccount.getUnconfirmedBalanceNQT() >= Convert.safeMultiply(attachment.getInitialBuySupply(), attachment.getBuyRateNQT())
+            if (senderAccount.getUnconfirmedBalanceNQT() >= Math.multiplyExact(attachment.getInitialBuySupply(), attachment.getBuyRateNQT())
                     && senderAccount.getUnconfirmedCurrencyUnits(attachment.getCurrencyId()) >= attachment.getInitialSellSupply()) {
-                senderAccount.addToUnconfirmedBalanceNQT(-Convert.safeMultiply(attachment.getInitialBuySupply(), attachment.getBuyRateNQT()));
-                senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), -attachment.getInitialSellSupply());
+                senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                        -Math.multiplyExact(attachment.getInitialBuySupply(), attachment.getBuyRateNQT()));
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), -attachment.getInitialSellSupply());
                 return true;
             }
             return false;
@@ -420,8 +521,13 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemPublishExchangeOffer attachment = (Attachment.MonetarySystemPublishExchangeOffer) transaction.getAttachment();
-            senderAccount.addToUnconfirmedBalanceNQT(Convert.safeMultiply(attachment.getInitialBuySupply(), attachment.getBuyRateNQT()));
-            senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), attachment.getInitialSellSupply());
+            senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                    Math.multiplyExact(attachment.getInitialBuySupply(), attachment.getBuyRateNQT()));
+            Currency currency = Currency.getCurrency(attachment.getCurrencyId());
+            if (currency != null) {
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), attachment.getInitialSellSupply());
+            }
         }
 
         @Override
@@ -467,6 +573,16 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_EXCHANGE_BUY;
+        }
+
+        @Override
+        public String getName() {
+            return "ExchangeBuy";
+        }
+
+        @Override
         Attachment.MonetarySystemExchangeBuy parseAttachment(ByteBuffer buffer, byte transactionVersion) throws NxtException.NotValidException {
             return new Attachment.MonetarySystemExchangeBuy(buffer, transactionVersion);
         }
@@ -480,8 +596,9 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemExchangeBuy attachment = (Attachment.MonetarySystemExchangeBuy) transaction.getAttachment();
-            if (senderAccount.getUnconfirmedBalanceNQT() >= Convert.safeMultiply(attachment.getUnits(), attachment.getRateNQT())) {
-                senderAccount.addToUnconfirmedBalanceNQT(-Convert.safeMultiply(attachment.getUnits(), attachment.getRateNQT()));
+            if (senderAccount.getUnconfirmedBalanceNQT() >= Math.multiplyExact(attachment.getUnits(), attachment.getRateNQT())) {
+                senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                        -Math.multiplyExact(attachment.getUnits(), attachment.getRateNQT()));
                 return true;
             }
             return false;
@@ -490,12 +607,14 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemExchangeBuy attachment = (Attachment.MonetarySystemExchangeBuy) transaction.getAttachment();
-            senderAccount.addToUnconfirmedBalanceNQT(Convert.safeMultiply(attachment.getUnits(), attachment.getRateNQT()));
+            senderAccount.addToUnconfirmedBalanceNQT(getLedgerEvent(), transaction.getId(),
+                    Math.multiplyExact(attachment.getUnits(), attachment.getRateNQT()));
         }
 
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemExchangeBuy attachment = (Attachment.MonetarySystemExchangeBuy) transaction.getAttachment();
+            ExchangeRequest.addExchangeRequest(transaction, attachment);
             CurrencyExchangeOffer.exchangeNXTForCurrency(transaction, senderAccount, attachment.getCurrencyId(), attachment.getRateNQT(), attachment.getUnits());
         }
 
@@ -506,6 +625,16 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         public byte getSubtype() {
             return SUBTYPE_MONETARY_SYSTEM_EXCHANGE_SELL;
+        }
+
+        @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_EXCHANGE_SELL;
+        }
+
+        @Override
+        public String getName() {
+            return "ExchangeSell";
         }
 
         @Override
@@ -522,7 +651,8 @@ public abstract class MonetarySystem extends TransactionType {
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemExchangeSell attachment = (Attachment.MonetarySystemExchangeSell) transaction.getAttachment();
             if (senderAccount.getUnconfirmedCurrencyUnits(attachment.getCurrencyId()) >= attachment.getUnits()) {
-                senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), -attachment.getUnits());
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), -attachment.getUnits());
                 return true;
             }
             return false;
@@ -531,12 +661,17 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
             Attachment.MonetarySystemExchangeSell attachment = (Attachment.MonetarySystemExchangeSell) transaction.getAttachment();
-            senderAccount.addToUnconfirmedCurrencyUnits(attachment.getCurrencyId(), attachment.getUnits());
+            Currency currency = Currency.getCurrency(attachment.getCurrencyId());
+            if (currency != null) {
+                senderAccount.addToUnconfirmedCurrencyUnits(getLedgerEvent(), transaction.getId(),
+                        attachment.getCurrencyId(), attachment.getUnits());
+            }
         }
 
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemExchangeSell attachment = (Attachment.MonetarySystemExchangeSell) transaction.getAttachment();
+            ExchangeRequest.addExchangeRequest(transaction, attachment);
             CurrencyExchangeOffer.exchangeCurrencyForNXT(transaction, senderAccount, attachment.getCurrencyId(), attachment.getRateNQT(), attachment.getUnits());
         }
 
@@ -547,6 +682,16 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         public byte getSubtype() {
             return SUBTYPE_MONETARY_SYSTEM_CURRENCY_MINTING;
+        }
+
+        @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_MINTING;
+        }
+
+        @Override
+        public String getName() {
+            return "CurrencyMinting";
         }
 
         @Override
@@ -575,9 +720,7 @@ public abstract class MonetarySystem extends TransactionType {
             }
             long counter = CurrencyMint.getCounter(attachment.getCurrencyId(), transaction.getSenderId());
             if (attachment.getCounter() <= counter) {
-                String debug = CurrencyMint.debug(attachment.getCurrencyId(), transaction.getSenderId());
-                throw new NxtException.NotCurrentlyValidException(String.format(debug + "\nCounter %d has to be bigger than %d \ntransaction %s", attachment.getCounter(), counter,
-                        transaction.getJSONObject().toJSONString()));
+                throw new NxtException.NotCurrentlyValidException(String.format("Counter %d has to be bigger than %d", attachment.getCounter(), counter));
             }
             if (!CurrencyMinting.meetsTarget(transaction.getSenderId(), currency, attachment)) {
                 throw new NxtException.NotCurrentlyValidException(String.format("Hash doesn't meet target %s", attachment.getJSONObject()));
@@ -596,18 +739,18 @@ public abstract class MonetarySystem extends TransactionType {
         @Override
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemCurrencyMinting attachment = (Attachment.MonetarySystemCurrencyMinting) transaction.getAttachment();
-            CurrencyMint.mintCurrency(senderAccount, attachment);
+            CurrencyMint.mintCurrency(getLedgerEvent(), transaction.getId(), senderAccount, attachment);
         }
 
         @Override
-        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Boolean>> duplicates) {
+        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
             Attachment.MonetarySystemCurrencyMinting attachment = (Attachment.MonetarySystemCurrencyMinting) transaction.getAttachment();
-            return super.isDuplicate(transaction, duplicates) ||
-                    TransactionType.isDuplicate(CURRENCY_MINTING, attachment.getCurrencyId() + ":" + transaction.getSenderId(), duplicates, true);
+            return TransactionType.isDuplicate(CURRENCY_MINTING, attachment.getCurrencyId() + ":" + transaction.getSenderId(), duplicates, true)
+                    || super.isDuplicate(transaction, duplicates);
         }
 
         @Override
-        boolean isUnconfirmedDuplicate(Transaction transaction, Map<TransactionType, Map<String, Boolean>> duplicates) {
+        boolean isUnconfirmedDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
             Attachment.MonetarySystemCurrencyMinting attachment = (Attachment.MonetarySystemCurrencyMinting) transaction.getAttachment();
             return TransactionType.isDuplicate(CURRENCY_MINTING, attachment.getCurrencyId() + ":" + transaction.getSenderId(), duplicates, true);
         }
@@ -627,6 +770,16 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
+        public LedgerEvent getLedgerEvent() {
+            return LedgerEvent.CURRENCY_DELETION;
+        }
+
+        @Override
+        public String getName() {
+            return "CurrencyDeletion";
+        }
+
+        @Override
         Attachment.MonetarySystemCurrencyDeletion parseAttachment(ByteBuffer buffer, byte transactionVersion) throws NxtException.NotValidException {
             return new Attachment.MonetarySystemCurrencyDeletion(buffer, transactionVersion);
         }
@@ -637,8 +790,8 @@ public abstract class MonetarySystem extends TransactionType {
         }
 
         @Override
-        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Boolean>> duplicates) {
-            Attachment.MonetarySystemAttachment attachment = (Attachment.MonetarySystemAttachment) transaction.getAttachment();
+        boolean isDuplicate(Transaction transaction, Map<TransactionType, Map<String, Integer>> duplicates) {
+            Attachment.MonetarySystemCurrencyDeletion attachment = (Attachment.MonetarySystemCurrencyDeletion) transaction.getAttachment();
             Currency currency = Currency.getCurrency(attachment.getCurrencyId());
             String nameLower = currency.getName().toLowerCase();
             String codeLower = currency.getCode().toLowerCase();
@@ -655,11 +808,10 @@ public abstract class MonetarySystem extends TransactionType {
             Currency currency = Currency.getCurrency(attachment.getCurrencyId());
             CurrencyType.validate(currency, transaction);
             if (!currency.canBeDeletedBy(transaction.getSenderId())) {
-                throw new NxtException.NotCurrentlyValidException("Currency " + Convert.toUnsignedLong(currency.getId()) + " cannot be deleted by account " +
-                    Convert.toUnsignedLong(transaction.getSenderId()));
+                throw new NxtException.NotCurrentlyValidException("Currency " + Long.toUnsignedString(currency.getId()) + " cannot be deleted by account " +
+                        Long.toUnsignedString(transaction.getSenderId()));
             }
         }
-
 
         @Override
         boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
@@ -674,7 +826,7 @@ public abstract class MonetarySystem extends TransactionType {
         void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
             Attachment.MonetarySystemCurrencyDeletion attachment = (Attachment.MonetarySystemCurrencyDeletion) transaction.getAttachment();
             Currency currency = Currency.getCurrency(attachment.getCurrencyId());
-            currency.delete(transaction.getSenderId());
+            currency.delete(getLedgerEvent(), transaction.getId(), senderAccount);
         }
 
         @Override
@@ -684,6 +836,4 @@ public abstract class MonetarySystem extends TransactionType {
 
     };
 
-
 }
-

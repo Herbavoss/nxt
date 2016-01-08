@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.DigitalGoodsStore;
@@ -22,30 +38,18 @@ public final class GetDGSGoods extends APIServlet.APIRequestHandler {
 
     @Override
     JSONStreamAware processRequest(HttpServletRequest req) throws NxtException {
-        long sellerId = ParameterParser.getSellerId(req);
+        long sellerId = ParameterParser.getAccountId(req, "seller", false);
         int firstIndex = ParameterParser.getFirstIndex(req);
         int lastIndex = ParameterParser.getLastIndex(req);
         boolean inStockOnly = !"false".equalsIgnoreCase(req.getParameter("inStockOnly"));
         boolean hideDelisted = "true".equalsIgnoreCase(req.getParameter("hideDelisted"));
-        boolean includeCounts = !"false".equalsIgnoreCase(req.getParameter("includeCounts"));
+        boolean includeCounts = "true".equalsIgnoreCase(req.getParameter("includeCounts"));
 
         JSONObject response = new JSONObject();
         JSONArray goodsJSON = new JSONArray();
         response.put("goods", goodsJSON);
 
-        Filter<DigitalGoodsStore.Goods> filter = hideDelisted ?
-                new Filter<DigitalGoodsStore.Goods>() {
-                    @Override
-                    public boolean ok(DigitalGoodsStore.Goods goods) {
-                        return ! goods.isDelisted();
-                    }
-                } :
-                new Filter<DigitalGoodsStore.Goods>() {
-                    @Override
-                    public boolean ok(DigitalGoodsStore.Goods goods) {
-                        return true;
-                    }
-                };
+        Filter<DigitalGoodsStore.Goods> filter = hideDelisted ? goods -> ! goods.isDelisted() : goods -> true;
 
         FilteringIterator<DigitalGoodsStore.Goods> iterator = null;
         try {

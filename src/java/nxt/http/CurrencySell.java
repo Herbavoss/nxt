@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.Account;
@@ -10,7 +26,7 @@ import javax.servlet.http.HttpServletRequest;
 
 /**
  * Sell currency for NXT
- * </p>
+ * <p>
  * Parameters
  * <ul>
  * <li>currency - currency id
@@ -18,7 +34,7 @@ import javax.servlet.http.HttpServletRequest;
  * <li>units - number of units to sell
  * </ul>
  *
- * </p>
+ * <p>
  * currency sell transaction attempts to match existing exchange offers. When a match is found, the minimum number of units
  * between the number of units offered and the units requested are exchanged at a rate matching the lowest buy offer<br>
  * A single transaction can match multiple buy offers or none.
@@ -42,7 +58,11 @@ public final class CurrencySell extends CreateTransaction {
         Account account = ParameterParser.getSenderAccount(req);
 
         Attachment attachment = new Attachment.MonetarySystemExchangeSell(currency.getId(), rateNQT, units);
-        return createTransaction(req, account, attachment);
+        try {
+            return createTransaction(req, account, attachment);
+        } catch (NxtException.InsufficientBalanceException e) {
+            return JSONResponses.NOT_ENOUGH_CURRENCY;
+        }
     }
 
 }

@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.crypto.Crypto;
@@ -21,10 +37,11 @@ import java.util.concurrent.TimeUnit;
 
 public final class Generator implements Comparable<Generator> {
 
-    public static enum Event {
+    public enum Event {
         GENERATION_DEADLINE, START_FORGING, STOP_FORGING
     }
 
+    private static final int MAX_FORGERS = Nxt.getIntProperty("nxt.maxNumberOfForgers");
     private static final byte[] fakeForgingPublicKey;
     static {
         byte[] publicKey = null;
@@ -54,7 +71,8 @@ public final class Generator implements Comparable<Generator> {
 
             try {
                 try {
-                    synchronized (Nxt.getBlockchain()) {
+                    BlockchainImpl.getInstance().updateLock();
+                    try {
                         Block lastBlock = Nxt.getBlockchain().getLastBlock();
                         if (lastBlock == null || lastBlock.getHeight() < Constants.LAST_KNOWN_BLOCK) {
                             return;
@@ -87,12 +105,14 @@ public final class Generator implements Comparable<Generator> {
                                 return;
                             }
                         }
-                    } // synchronized
+                    } finally {
+                        BlockchainImpl.getInstance().updateUnlock();
+                    }
                 } catch (Exception e) {
-                    Logger.logDebugMessage("Error in block generation thread", e);
+                    Logger.logMessage("Error in block generation thread", e);
                 }
             } catch (Throwable t) {
-                Logger.logMessage("CRITICAL ERROR. PLEASE REPORT TO THE DEVELOPERS.\n" + t.toString());
+                Logger.logErrorMessage("CRITICAL ERROR. PLEASE REPORT TO THE DEVELOPERS.\n" + t.toString());
                 t.printStackTrace();
                 System.exit(1);
             }
@@ -116,6 +136,9 @@ public final class Generator implements Comparable<Generator> {
     }
 
     public static Generator startForging(String secretPhrase) {
+        if (generators.size() >= MAX_FORGERS) {
+            throw new RuntimeException("Cannot forge with more than " + MAX_FORGERS + " accounts on the same node");
+        }
         Generator generator = new Generator(secretPhrase);
         Generator old = generators.putIfAbsent(secretPhrase, generator);
         if (old != null) {
@@ -154,6 +177,10 @@ public final class Generator implements Comparable<Generator> {
         return generators.get(secretPhrase);
     }
 
+    public static int getGeneratorCount() {
+        return generators.size();
+    }
+
     public static Collection<Generator> getAllGenerators() {
         return allGenerators;
     }
@@ -163,7 +190,8 @@ public final class Generator implements Comparable<Generator> {
     }
 
     public static long getNextHitTime(long lastBlockId, int curTime) {
-        synchronized (Nxt.getBlockchain()) {
+        BlockchainImpl.getInstance().readLock();
+        try {
             if (lastBlockId == Generator.lastBlockId && sortedForgers != null) {
                 for (Generator generator : sortedForgers) {
                     if (generator.getHitTime() >= curTime - Constants.FORGING_DELAY) {
@@ -172,13 +200,13 @@ public final class Generator implements Comparable<Generator> {
                 }
             }
             return 0;
+        } finally {
+            BlockchainImpl.getInstance().readUnlock();
         }
     }
 
     static void setDelay(int delay) {
-        synchronized (Nxt.getBlockchain()) {
-            Generator.delayTime = delay;
-        }
+        Generator.delayTime = delay;
     }
 
     static boolean verifyHit(BigInteger hit, BigInteger effectiveBalance, Block previousBlock, int timestamp) {
@@ -197,7 +225,7 @@ public final class Generator implements Comparable<Generator> {
     }
 
     static long getHitTime(Account account, Block block) {
-        return getHitTime(BigInteger.valueOf(account.getEffectiveBalanceNXT()), getHit(account.getPublicKey(), block), block);
+        return getHitTime(BigInteger.valueOf(account.getEffectiveBalanceNXT(block.getHeight())), getHit(account.getPublicKey(), block), block);
     }
 
     static boolean allowsFakeForging(byte[] publicKey) {
@@ -267,7 +295,7 @@ public final class Generator implements Comparable<Generator> {
 
     @Override
     public String toString() {
-        return "Forger " + Convert.toUnsignedLong(accountId) + " deadline " + getDeadline() + " hit " + hitTime;
+        return "Forger " + Long.toUnsignedString(accountId) + " deadline " + getDeadline() + " hit " + hitTime;
     }
 
     private void setLastBlock(Block lastBlock) {

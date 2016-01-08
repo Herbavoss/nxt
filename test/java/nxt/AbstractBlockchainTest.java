@@ -1,7 +1,22 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.crypto.Crypto;
-import nxt.db.DbIterator;
 import nxt.util.Listener;
 import nxt.util.Logger;
 import org.junit.Assert;
@@ -31,7 +46,7 @@ public abstract class AbstractBlockchainTest {
         testProperties.setProperty("nxt.debugTraceAccounts", "");
         testProperties.setProperty("nxt.debugLogUnconfirmed", "false");
         testProperties.setProperty("nxt.debugTraceQuote", "\"");
-        testProperties.setProperty("nxt.numberOfForkConfirmations", "0");
+        //testProperties.setProperty("nxt.numberOfForkConfirmations", "0");
         return testProperties;
     }
 
@@ -40,23 +55,17 @@ public abstract class AbstractBlockchainTest {
         blockchain = BlockchainImpl.getInstance();
         blockchainProcessor = BlockchainProcessorImpl.getInstance();
         blockchainProcessor.setGetMoreBlocks(false);
-        Listener<Block> countingListener = new Listener<Block>() {
-            @Override
-            public void notify(Block block) {
-                if (block.getHeight() % 1000 == 0) {
-                    Logger.logMessage("downloaded block " + block.getHeight());
-                }
+        TransactionProcessorImpl.getInstance().clearUnconfirmedTransactions();
+        Listener<Block> countingListener = block -> {
+            if (block.getHeight() % 1000 == 0) {
+                Logger.logMessage("downloaded block " + block.getHeight());
             }
         };
         blockchainProcessor.addListener(countingListener, BlockchainProcessor.Event.BLOCK_PUSHED);
     }
 
     protected static void shutdown() {
-        TransactionProcessorImpl transactionProcessor = TransactionProcessorImpl.getInstance();
-        DbIterator<UnconfirmedTransaction> allUnconfirmedTransactions = transactionProcessor.getAllUnconfirmedTransactions();
-        for (UnconfirmedTransaction unconfirmedTransaction : allUnconfirmedTransactions) {
-            transactionProcessor.removeUnconfirmedTransaction(unconfirmedTransaction.getTransaction());
-        }
+        TransactionProcessorImpl.getInstance().clearUnconfirmedTransactions();
     }
 
     protected static void downloadTo(final int endHeight) {
@@ -64,16 +73,13 @@ public abstract class AbstractBlockchainTest {
             return;
         }
         Assert.assertTrue(blockchain.getHeight() < endHeight);
-        Listener<Block> stopListener = new Listener<Block>() {
-            @Override
-            public void notify(Block block) {
-                if (blockchain.getHeight() == endHeight) {
-                    synchronized (doneLock) {
-                        done = true;
-                        blockchainProcessor.setGetMoreBlocks(false);
-                        doneLock.notifyAll();
-                        throw new NxtException.StopException("Reached height " + endHeight);
-                    }
+        Listener<Block> stopListener = block -> {
+            if (blockchain.getHeight() == endHeight) {
+                synchronized (doneLock) {
+                    done = true;
+                    blockchainProcessor.setGetMoreBlocks(false);
+                    doneLock.notifyAll();
+                    throw new NxtException.StopException("Reached height " + endHeight);
                 }
             }
         };
@@ -99,15 +105,12 @@ public abstract class AbstractBlockchainTest {
             return;
         }
         Assert.assertTrue(blockchain.getHeight() < endHeight);
-        Listener<Block> stopListener = new Listener<Block>() {
-            @Override
-            public void notify(Block block) {
-                if (blockchain.getHeight() == endHeight) {
-                    synchronized (doneLock) {
-                        done = true;
-                        Generator.stopForging(secretPhrase);
-                        doneLock.notifyAll();
-                    }
+        Listener<Block> stopListener = block -> {
+            if (blockchain.getHeight() == endHeight) {
+                synchronized (doneLock) {
+                    done = true;
+                    Generator.stopForging(secretPhrase);
+                    doneLock.notifyAll();
                 }
             }
         };

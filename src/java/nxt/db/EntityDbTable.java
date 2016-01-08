@@ -1,6 +1,23 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.db;
 
 import nxt.Nxt;
+import nxt.util.Logger;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -12,16 +29,22 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     private final boolean multiversion;
     protected final DbKey.Factory<T> dbKeyFactory;
     private final String defaultSort;
+    private final String fullTextSearchColumns;
 
     protected EntityDbTable(String table, DbKey.Factory<T> dbKeyFactory) {
-        this(table, dbKeyFactory, false);
+        this(table, dbKeyFactory, false, null);
     }
 
-    EntityDbTable(String table, DbKey.Factory<T> dbKeyFactory, boolean multiversion) {
+    protected EntityDbTable(String table, DbKey.Factory<T> dbKeyFactory, String fullTextSearchColumns) {
+        this(table, dbKeyFactory, false, fullTextSearchColumns);
+    }
+
+    EntityDbTable(String table, DbKey.Factory<T> dbKeyFactory, boolean multiversion, String fullTextSearchColumns) {
         super(table);
         this.dbKeyFactory = dbKeyFactory;
         this.multiversion = multiversion;
-        this.defaultSort = " ORDER BY " + (multiversion ? dbKeyFactory.getPKColumns() : " height DESC ");
+        this.defaultSort = " ORDER BY " + (multiversion ? dbKeyFactory.getPKColumns() : " height DESC, db_id DESC ");
+        this.fullTextSearchColumns = fullTextSearchColumns;
     }
 
     protected abstract T load(Connection con, ResultSet rs) throws SQLException;
@@ -33,17 +56,39 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     protected void clearCache() {
-        db.getCache(table).clear();
+        db.clearCache(table);
     }
 
     public void checkAvailable(int height) {
         if (multiversion && height < Nxt.getBlockchainProcessor().getMinRollbackHeight()) {
             throw new IllegalArgumentException("Historical data as of height " + height +" not available.");
         }
+        if (height > Nxt.getBlockchain().getHeight()) {
+            throw new IllegalArgumentException("Height " + height + " exceeds blockchain height " + Nxt.getBlockchain().getHeight());
+        }
+    }
+
+    public final T newEntity(DbKey dbKey) {
+        boolean cache = db.isInTransaction();
+        if (cache) {
+            T t = (T) db.getCache(table).get(dbKey);
+            if (t != null) {
+                return t;
+            }
+        }
+        T t = dbKeyFactory.newEntity(dbKey);
+        if (cache) {
+            db.getCache(table).put(dbKey, t);
+        }
+        return t;
     }
 
     public final T get(DbKey dbKey) {
-        if (db.isInTransaction()) {
+        return get(dbKey, true);
+    }
+
+    public final T get(DbKey dbKey, boolean cache) {
+        if (cache && db.isInTransaction()) {
             T t = (T) db.getCache(table).get(dbKey);
             if (t != null) {
                 return t;
@@ -53,13 +98,16 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
              PreparedStatement pstmt = con.prepareStatement("SELECT * FROM " + table + dbKeyFactory.getPKClause()
              + (multiversion ? " AND latest = TRUE LIMIT 1" : ""))) {
             dbKey.setPK(pstmt);
-            return get(con, pstmt, true);
+            return get(con, pstmt, cache);
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
         }
     }
 
     public final T get(DbKey dbKey, int height) {
+        if (height < 0 || height == Nxt.getBlockchain().getHeight()) {
+            return get(dbKey);
+        }
         checkAvailable(height);
         try (Connection con = db.getConnection();
              PreparedStatement pstmt = con.prepareStatement("SELECT * FROM " + table + dbKeyFactory.getPKClause()
@@ -89,6 +137,9 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     public final T getBy(DbClause dbClause, int height) {
+        if (height < 0 || height == Nxt.getBlockchain().getHeight()) {
+            return getBy(dbClause);
+        }
         checkAvailable(height);
         try (Connection con = db.getConnection();
              PreparedStatement pstmt = con.prepareStatement("SELECT * FROM " + table + " AS a WHERE " + dbClause.getClause()
@@ -120,9 +171,6 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
                 t = (T) db.getCache(table).get(dbKey);
             }
             if (t == null) {
-                if (db.isInTransaction() && rs.getInt("height") > Nxt.getBlockchain().getHeight() && !"public_key".equals(table)) {
-                    throw new RuntimeException("Table " + table + " is at height " + rs.getInt("height") + " while blockchain is at " + Nxt.getBlockchain().getHeight());
-                }
                 t = load(con, rs);
                 if (doCache) {
                     db.getCache(table).put(dbKey, t);
@@ -161,6 +209,9 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     public final DbIterator<T> getManyBy(DbClause dbClause, int height, int from, int to, String sort) {
+        if (height < 0 || height == Nxt.getBlockchain().getHeight()) {
+            return getManyBy(dbClause, from, to, sort);
+        }
         checkAvailable(height);
         Connection con = null;
         try {
@@ -189,23 +240,20 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
 
     public final DbIterator<T> getManyBy(Connection con, PreparedStatement pstmt, boolean cache) {
         final boolean doCache = cache && db.isInTransaction();
-        return new DbIterator<>(con, pstmt, new DbIterator.ResultSetReader<T>() {
-            @Override
-            public T get(Connection con, ResultSet rs) throws Exception {
-                T t = null;
-                DbKey dbKey = null;
-                if (doCache) {
-                    dbKey = dbKeyFactory.newKey(rs);
-                    t = (T) db.getCache(table).get(dbKey);
-                }
-                if (t == null) {
-                    t = load(con, rs);
-                    if (doCache) {
-                        db.getCache(table).put(dbKey, t);
-                    }
-                }
-                return t;
+        return new DbIterator<>(con, pstmt, (connection, rs) -> {
+            T t = null;
+            DbKey dbKey = null;
+            if (doCache) {
+                dbKey = dbKeyFactory.newKey(rs);
+                t = (T) db.getCache(table).get(dbKey);
             }
+            if (t == null) {
+                t = load(connection, rs);
+                if (doCache) {
+                    db.getCache(table).put(dbKey, t);
+                }
+            }
+            return t;
         });
     }
 
@@ -217,13 +265,14 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
         Connection con = null;
         try {
             con = db.getConnection();
-            PreparedStatement pstmt = con.prepareStatement("SELECT " + table + ".*, ft.score FROM " + table + ", ftl_search_data(?, 2147483647, 0) ft "
-                    + " WHERE " + table + ".db_id = ft.keys[0] AND ft.table = ? " + (multiversion ? " AND " + table + ".latest = TRUE " : " ")
+            PreparedStatement pstmt = con.prepareStatement("SELECT " + table + ".*, ft.score FROM " + table +
+                    ", ftl_search('PUBLIC', '" + table + "', ?, 2147483647, 0) ft "
+                    + " WHERE " + table + ".db_id = ft.keys[0] "
+                    + (multiversion ? " AND " + table + ".latest = TRUE " : " ")
                     + " AND " + dbClause.getClause() + sort
                     + DbUtils.limitsClause(from, to));
             int i = 0;
             pstmt.setString(++i, query);
-            pstmt.setString(++i, table.toUpperCase());
             i = dbClause.set(pstmt, ++i);
             i = DbUtils.setLimits(i, pstmt, from, to);
             return getManyBy(con, pstmt, true);
@@ -257,6 +306,9 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     public final DbIterator<T> getAll(int height, int from, int to, String sort) {
+        if (height < 0 || height == Nxt.getBlockchain().getHeight()) {
+            return getAll(from, to, sort);
+        }
         checkAvailable(height);
         Connection con = null;
         try {
@@ -303,6 +355,9 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
     }
 
     public final int getCount(DbClause dbClause, int height) {
+        if (height < 0 || height == Nxt.getBlockchain().getHeight()) {
+            return getCount(dbClause);
+        }
         checkAvailable(height);
         Connection con = null;
         try {
@@ -352,6 +407,7 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
         if (cachedT == null) {
             db.getCache(table).put(dbKey, t);
         } else if (t != cachedT) { // not a bug
+            Logger.logDebugMessage("In cache : " + cachedT.toString() + ", inserting " + t.toString());
             throw new IllegalStateException("Different instance found in Db cache, perhaps trying to save an object "
                     + "that was read outside the current transaction");
         }
@@ -371,14 +427,28 @@ public abstract class EntityDbTable<T> extends DerivedDbTable {
 
     @Override
     public void rollback(int height) {
-        super.rollback(height);
-        db.getCache(table).clear();
+        if (multiversion) {
+            VersionedEntityDbTable.rollback(db, table, height, dbKeyFactory);
+        } else {
+            super.rollback(height);
+        }
     }
 
     @Override
-    public void truncate() {
-        super.truncate();
-        db.getCache(table).clear();
+    public void trim(int height) {
+        if (multiversion) {
+            VersionedEntityDbTable.trim(db, table, height, dbKeyFactory);
+        } else {
+            super.trim(height);
+        }
+    }
+
+    @Override
+    public final void createSearchIndex(Connection con) throws SQLException {
+        if (fullTextSearchColumns != null) {
+            Logger.logDebugMessage("Creating search index on " + table + " (" + fullTextSearchColumns + ")");
+            FullTextTrigger.createIndex(con, "PUBLIC", table.toUpperCase(), fullTextSearchColumns.toUpperCase());
+        }
     }
 
 }

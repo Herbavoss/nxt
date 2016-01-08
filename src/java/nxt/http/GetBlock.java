@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.Block;
@@ -17,7 +33,7 @@ public final class GetBlock extends APIServlet.APIRequestHandler {
     static final GetBlock instance = new GetBlock();
 
     private GetBlock() {
-        super(new APITag[] {APITag.BLOCKS}, "block", "height", "timestamp", "includeTransactions");
+        super(new APITag[] {APITag.BLOCKS}, "block", "height", "timestamp", "includeTransactions", "includeExecutedPhased");
     }
 
     @Override
@@ -62,8 +78,9 @@ public final class GetBlock extends APIServlet.APIRequestHandler {
         }
 
         boolean includeTransactions = "true".equalsIgnoreCase(req.getParameter("includeTransactions"));
+        boolean includeExecutedPhased = "true".equalsIgnoreCase(req.getParameter("includeExecutedPhased"));
 
-        return JSONData.block(blockData, includeTransactions);
+        return JSONData.block(blockData, includeTransactions, includeExecutedPhased);
 
     }
 

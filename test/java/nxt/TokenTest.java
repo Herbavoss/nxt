@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import org.junit.Test;
@@ -6,7 +22,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class TokenTest {
+public class TokenTest extends BlockchainTest {
     @Test
     public void testParseValidToken() throws Exception {
         String token = "6s7hchl9q0e5jgrrtgscoip2lcb2o3oi7ndso1bnjr475suv001ug93uu8aq2f00o7q6pvs2ivrpra1svouvb4k5nreco0tt94qest9mq5jg2qihcvj5n5ljqht5fl6n39nslr7kidqh8kh8u8v6e4rn92f47l3i";

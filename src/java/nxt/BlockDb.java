@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.db.DbUtils;
@@ -9,10 +25,58 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 final class BlockDb {
 
+    /** Block cache */
+    static final int BLOCK_CACHE_SIZE = 10;
+    static final Map<Long, BlockImpl> blockCache = new HashMap<>();
+    static final SortedMap<Integer, BlockImpl> heightMap = new TreeMap<>();
+    static final Map<Long, TransactionImpl> transactionCache = new HashMap<>();
+    static final Blockchain blockchain = Nxt.getBlockchain();
+    static {
+        Nxt.getBlockchainProcessor().addListener((block) -> {
+            synchronized (blockCache) {
+                int height = block.getHeight();
+                Iterator<BlockImpl> it = blockCache.values().iterator();
+                while (it.hasNext()) {
+                    Block cacheBlock = it.next();
+                    int cacheHeight = cacheBlock.getHeight();
+                    if (cacheHeight <= height - BLOCK_CACHE_SIZE || cacheHeight >= height) {
+                        cacheBlock.getTransactions().forEach((tx) -> transactionCache.remove(tx.getId()));
+                        heightMap.remove(cacheHeight);
+                        it.remove();
+                    }
+                }
+                block.getTransactions().forEach((tx) -> transactionCache.put(tx.getId(), (TransactionImpl)tx));
+                heightMap.put(height, (BlockImpl)block);
+                blockCache.put(block.getId(), (BlockImpl)block);
+            }
+        }, BlockchainProcessor.Event.BLOCK_PUSHED);
+    }
+
+    static private void clearBlockCache() {
+        synchronized (blockCache) {
+            blockCache.clear();
+            heightMap.clear();
+            transactionCache.clear();
+        }
+    }
+
     static BlockImpl findBlock(long blockId) {
+        // Check the block cache
+        synchronized (blockCache) {
+            BlockImpl block = blockCache.get(blockId);
+            if (block != null) {
+                return block;
+            }
+        }
+        // Search the database
         try (Connection con = Db.db.getConnection();
              PreparedStatement pstmt = con.prepareStatement("SELECT * FROM block WHERE id = ?")) {
             pstmt.setLong(1, blockId);
@@ -25,17 +89,27 @@ final class BlockDb {
             }
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
-        } catch (NxtException.ValidationException e) {
-            throw new RuntimeException("Block already in database, id = " + blockId + ", does not pass validation!", e);
         }
     }
 
     static boolean hasBlock(long blockId) {
+        return hasBlock(blockId, Integer.MAX_VALUE);
+    }
+
+    static boolean hasBlock(long blockId, int height) {
+        // Check the block cache
+        synchronized(blockCache) {
+            BlockImpl block = blockCache.get(blockId);
+            if (block != null) {
+                return block.getHeight() <= height;
+            }
+        }
+        // Search the database
         try (Connection con = Db.db.getConnection();
-             PreparedStatement pstmt = con.prepareStatement("SELECT 1 FROM block WHERE id = ?")) {
+             PreparedStatement pstmt = con.prepareStatement("SELECT height FROM block WHERE id = ?")) {
             pstmt.setLong(1, blockId);
             try (ResultSet rs = pstmt.executeQuery()) {
-                return rs.next();
+                return rs.next() && rs.getInt("height") <= height;
             }
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
@@ -43,6 +117,14 @@ final class BlockDb {
     }
 
     static long findBlockIdAtHeight(int height) {
+        // Check the cache
+        synchronized(blockCache) {
+            BlockImpl block = heightMap.get(height);
+            if (block != null) {
+                return block.getId();
+            }
+        }
+        // Search the database
         try (Connection con = Db.db.getConnection();
              PreparedStatement pstmt = con.prepareStatement("SELECT id FROM block WHERE height = ?")) {
             pstmt.setInt(1, height);
@@ -58,6 +140,14 @@ final class BlockDb {
     }
 
     static BlockImpl findBlockAtHeight(int height) {
+        // Check the cache
+        synchronized(blockCache) {
+            BlockImpl block = heightMap.get(height);
+            if (block != null) {
+                return block;
+            }
+        }
+        // Search the database
         try (Connection con = Db.db.getConnection();
              PreparedStatement pstmt = con.prepareStatement("SELECT * FROM block WHERE height = ?")) {
             pstmt.setInt(1, height);
@@ -72,8 +162,6 @@ final class BlockDb {
             }
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
-        } catch (NxtException.ValidationException e) {
-            throw new RuntimeException("Block already in database at height " + height + ", does not pass validation!", e);
         }
     }
 
@@ -89,8 +177,6 @@ final class BlockDb {
             return block;
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
-        } catch (NxtException.ValidationException e) {
-            throw new RuntimeException("Last block already in database does not pass validation!", e);
         }
     }
 
@@ -107,12 +193,14 @@ final class BlockDb {
             return block;
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
-        } catch (NxtException.ValidationException e) {
-            throw new RuntimeException("Block already in database at timestamp " + timestamp + " does not pass validation!", e);
         }
     }
 
-    static BlockImpl loadBlock(Connection con, ResultSet rs) throws NxtException.ValidationException {
+    static BlockImpl loadBlock(Connection con, ResultSet rs) {
+        return loadBlock(con, rs, false);
+    }
+
+    static BlockImpl loadBlock(Connection con, ResultSet rs, boolean loadTransactions) {
         try {
             int version = rs.getInt("version");
             int timestamp = rs.getInt("timestamp");
@@ -132,7 +220,7 @@ final class BlockDb {
             long id = rs.getLong("id");
             return new BlockImpl(version, timestamp, previousBlockId, totalAmountNQT, totalFeeNQT, payloadLength, payloadHash,
                     generatorId, generationSignature, blockSignature, previousBlockHash,
-                    cumulativeDifficulty, baseTarget, nextBlockId, height, id);
+                    cumulativeDifficulty, baseTarget, nextBlockId, height, id, loadTransactions ? TransactionDb.findBlockTransactions(con, id) : null);
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
         }
@@ -210,6 +298,8 @@ final class BlockDb {
             }
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
+        } finally {
+            clearBlockCache();
         }
     }
 
@@ -234,7 +324,13 @@ final class BlockDb {
                 stmt.executeUpdate("SET REFERENTIAL_INTEGRITY FALSE");
                 stmt.executeUpdate("TRUNCATE TABLE transaction");
                 stmt.executeUpdate("TRUNCATE TABLE block");
-                stmt.executeUpdate("TRUNCATE TABLE public_key");
+                BlockchainProcessorImpl.getInstance().getDerivedTables().forEach(table -> {
+                    if (table.isPersistent()) {
+                        try {
+                            stmt.executeUpdate("TRUNCATE TABLE " + table.toString());
+                        } catch (SQLException ignore) {}
+                    }
+                });
                 stmt.executeUpdate("SET REFERENTIAL_INTEGRITY TRUE");
                 Db.db.commitTransaction();
             } catch (SQLException e) {
@@ -243,6 +339,8 @@ final class BlockDb {
             }
         } catch (SQLException e) {
             throw new RuntimeException(e.toString(), e);
+        } finally {
+            clearBlockCache();
         }
     }
 

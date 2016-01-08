@@ -1,6 +1,20 @@
-package nxt.crypto;
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
 
-import org.bouncycastle.jcajce.provider.digest.SHA3;
+package nxt.crypto;
 
 public enum HashFunction {
 
@@ -13,11 +27,11 @@ public enum HashFunction {
         }
     },
     /**
-     * Use Bouncy Castle implementation of SHA3 (code 3)
+     * Use Bouncy Castle implementation of SHA3 (code 3). As of Bouncy Castle 1.53, this has been renamed to Keccak.
      */
     SHA3((byte)3) {
         public byte[] hash(byte[] input) {
-            return new SHA3.DigestSHA3(256).digest(input);
+            return Crypto.sha3().digest(input);
         }
     },
     /**
@@ -34,6 +48,16 @@ public enum HashFunction {
     Keccak25((byte)25) {
         public byte[] hash(byte[] input) {
             return KNV25.hash(input);
+        }
+    },
+    RIPEMD160((byte)6) {
+        public byte[] hash(byte[] input) {
+            return Crypto.ripemd160().digest(input);
+        }
+    },
+    RIPEMD160_SHA256((byte)62) {
+        public byte[] hash(byte[] input) {
+            return Crypto.ripemd160().digest(Crypto.sha256().digest(input));
         }
     };
 

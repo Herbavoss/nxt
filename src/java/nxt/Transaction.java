@@ -1,24 +1,47 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
+import nxt.util.Filter;
 import org.json.simple.JSONObject;
 
 import java.util.List;
 
 public interface Transaction {
 
-    public static interface Builder {
+    interface Builder {
 
         Builder recipientId(long recipientId);
 
         Builder referencedTransactionFullHash(String referencedTransactionFullHash);
 
-        Builder message(Appendix.Message message);
+        Builder appendix(Appendix.Message message);
 
-        Builder encryptedMessage(Appendix.EncryptedMessage encryptedMessage);
+        Builder appendix(Appendix.EncryptedMessage encryptedMessage);
 
-        Builder encryptToSelfMessage(Appendix.EncryptToSelfMessage encryptToSelfMessage);
+        Builder appendix(Appendix.EncryptToSelfMessage encryptToSelfMessage);
 
-        Builder publicKeyAnnouncement(Appendix.PublicKeyAnnouncement publicKeyAnnouncement);
+        Builder appendix(Appendix.PublicKeyAnnouncement publicKeyAnnouncement);
+
+        Builder appendix(Appendix.PrunablePlainMessage prunablePlainMessage);
+
+        Builder appendix(Appendix.PrunableEncryptedMessage prunableEncryptedMessage);
+
+        Builder appendix(Appendix.Phasing phasing);
 
         Builder timestamp(int timestamp);
 
@@ -27,6 +50,8 @@ public interface Transaction {
         Builder ecBlockId(long blockId);
 
         Transaction build() throws NxtException.NotValidException;
+
+        Transaction build(String secretPhrase) throws NxtException.NotValidException;
 
     }
 
@@ -70,8 +95,6 @@ public interface Transaction {
 
     Attachment getAttachment();
 
-    void sign(String secretPhrase);
-
     boolean verifySignature();
 
     void validate() throws NxtException.ValidationException;
@@ -82,7 +105,11 @@ public interface Transaction {
 
     JSONObject getJSONObject();
 
+    JSONObject getPrunableAttachmentJSON();
+
     byte getVersion();
+
+    int getFullSize();
 
     Appendix.Message getMessage();
 
@@ -90,16 +117,19 @@ public interface Transaction {
 
     Appendix.EncryptToSelfMessage getEncryptToSelfMessage();
 
+    Appendix.Phasing getPhasing();
+
+    Appendix.PrunablePlainMessage getPrunablePlainMessage();
+
+    Appendix.PrunableEncryptedMessage getPrunableEncryptedMessage();
+
     List<? extends Appendix> getAppendages();
 
-    /*
-    Collection<TransactionType> getPhasingTransactionTypes();
+    List<? extends Appendix> getAppendages(boolean includeExpiredPrunable);
 
-    Collection<TransactionType> getPhasedTransactionTypes();
-    */
+    List<? extends Appendix> getAppendages(Filter<Appendix> filter, boolean includeExpiredPrunable);
 
     int getECBlockHeight();
 
     long getECBlockId();
-
 }

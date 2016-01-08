@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.db.DbClause;
@@ -5,9 +21,6 @@ import nxt.db.DbIterator;
 import nxt.db.DbKey;
 import nxt.db.DbUtils;
 import nxt.db.EntityDbTable;
-import nxt.db.FilteringIterator;
-import nxt.util.Convert;
-import nxt.util.Filter;
 import nxt.util.Listener;
 import nxt.util.Listeners;
 
@@ -15,10 +28,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class Exchange {
 
-    public static enum Event {
+    public enum Event {
         EXCHANGE
     }
 
@@ -67,12 +82,30 @@ public final class Exchange {
         return exchangeTable.getManyBy(new DbClause.LongClause("currency_id", currencyId), from, to);
     }
 
+    public static List<Exchange> getLastExchanges(long[] currencyIds) {
+        try (Connection con = Db.db.getConnection();
+             PreparedStatement pstmt = con.prepareStatement("SELECT * FROM exchange WHERE currency_id = ? ORDER BY height DESC, db_id DESC LIMIT 1")) {
+            List<Exchange> result = new ArrayList<>();
+            for (long currencyId : currencyIds) {
+                pstmt.setLong(1, currencyId);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        result.add(new Exchange(rs));
+                    }
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new RuntimeException(e.toString(), e);
+        }
+    }
+
     public static DbIterator<Exchange> getAccountExchanges(long accountId, int from, int to) {
         Connection con = null;
         try {
             con = Db.db.getConnection();
             PreparedStatement pstmt = con.prepareStatement("SELECT * FROM exchange WHERE seller_id = ?"
-                    + " UNION ALL SELECT * FROM exchange WHERE buyer_id = ? AND seller_id <> ? ORDER BY height DESC"
+                    + " UNION ALL SELECT * FROM exchange WHERE buyer_id = ? AND seller_id <> ? ORDER BY height DESC, db_id DESC"
                     + DbUtils.limitsClause(from, to));
             int i = 0;
             pstmt.setLong(++i, accountId);
@@ -91,7 +124,7 @@ public final class Exchange {
         try {
             con = Db.db.getConnection();
             PreparedStatement pstmt = con.prepareStatement("SELECT * FROM exchange WHERE seller_id = ? AND currency_id = ?"
-                    + " UNION ALL SELECT * FROM exchange WHERE buyer_id = ? AND seller_id <> ? AND currency_id = ? ORDER BY height DESC"
+                    + " UNION ALL SELECT * FROM exchange WHERE buyer_id = ? AND seller_id <> ? AND currency_id = ? ORDER BY height DESC, db_id DESC"
                     + DbUtils.limitsClause(from, to));
             int i = 0;
             pstmt.setLong(++i, accountId);
@@ -107,36 +140,12 @@ public final class Exchange {
         }
     }
 
-    public static FilteringIterator<? extends Transaction> getAccountCurrencyExchangeRequests(final long accountId, final long currencyId, int from, int to) {
-        Connection con = null;
-        try {
-            con = Db.db.getConnection();
-            PreparedStatement pstmt = con.prepareStatement("SELECT * FROM transaction where sender_id = ? AND type = ? AND (subtype = ? OR subtype = ?) " +
-                    " ORDER BY block_timestamp DESC, transaction_index DESC ");
-            int i = 0;
-            pstmt.setLong(++i, accountId);
-            pstmt.setByte(++i, MonetarySystem.EXCHANGE_BUY.getType());
-            pstmt.setByte(++i, MonetarySystem.EXCHANGE_BUY.getSubtype());
-            pstmt.setByte(++i, MonetarySystem.EXCHANGE_SELL.getSubtype());
-            return new FilteringIterator<>(BlockchainImpl.getInstance().getTransactions(con, pstmt),
-                    new Filter<TransactionImpl>() {
-                        @Override
-                        public boolean ok(TransactionImpl transaction) {
-                            return ((Attachment.MonetarySystemAttachment)transaction.getAttachment()).getCurrencyId() == currencyId;
-                        }
-                    }, from, to);
-        } catch (SQLException e) {
-            DbUtils.close(con);
-            throw new RuntimeException(e.toString(), e);
-        }
-    }
-
     public static DbIterator<Exchange> getExchanges(long transactionId) {
-        return exchangeTable.getManyBy(new DbClause.LongClause("transaction_id", transactionId), 0, -1, " ORDER BY height DESC ");
+        return exchangeTable.getManyBy(new DbClause.LongClause("transaction_id", transactionId), 0, -1);
     }
 
     public static DbIterator<Exchange> getOfferExchanges(long offerId, int from, int to) {
-        return exchangeTable.getManyBy(new DbClause.LongClause("offer_id", offerId), from, to, " ORDER BY height DESC ");
+        return exchangeTable.getManyBy(new DbClause.LongClause("offer_id", offerId), from, to);
     }
 
     public static int getExchangeCount(long currencyId) {
@@ -144,7 +153,7 @@ public final class Exchange {
     }
 
     static Exchange addExchange(Transaction transaction, long currencyId, CurrencyExchangeOffer offer, long sellerId, long buyerId, long units) {
-        Exchange exchange = new Exchange(transaction, currencyId, offer, sellerId, buyerId, units);
+        Exchange exchange = new Exchange(transaction.getId(), currencyId, offer, sellerId, buyerId, units);
         exchangeTable.insert(exchange);
         listeners.notify(exchange, Event.EXCHANGE);
         return exchange;
@@ -165,12 +174,13 @@ public final class Exchange {
     private final long units;
     private final long rate;
 
-    private Exchange(Transaction transaction, long currencyId, CurrencyExchangeOffer offer, long sellerId, long buyerId, long units) {
-        this.transactionId = transaction.getId();
-        this.blockId = transaction.getBlockId();
-        this.height = transaction.getHeight();
+    private Exchange(long transactionId, long currencyId, CurrencyExchangeOffer offer, long sellerId, long buyerId, long units) {
+        Block block = Nxt.getBlockchain().getLastBlock();
+        this.transactionId = transactionId;
+        this.blockId = block.getId();
+        this.height = block.getHeight();
         this.currencyId = currencyId;
-        this.timestamp = transaction.getBlockTimestamp();
+        this.timestamp = block.getTimestamp();
         this.offerId = offer.getId();
         this.sellerId = sellerId;
         this.buyerId = buyerId;
@@ -197,16 +207,16 @@ public final class Exchange {
         try (PreparedStatement pstmt = con.prepareStatement("INSERT INTO exchange (transaction_id, currency_id, block_id, "
                 + "offer_id, seller_id, buyer_id, units, rate, timestamp, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             int i = 0;
-            pstmt.setLong(++i, this.getTransactionId());
-            pstmt.setLong(++i, this.getCurrencyId());
-            pstmt.setLong(++i, this.getBlockId());
-            pstmt.setLong(++i, this.getOfferId());
-            pstmt.setLong(++i, this.getSellerId());
-            pstmt.setLong(++i, this.getBuyerId());
-            pstmt.setLong(++i, this.getUnits());
-            pstmt.setLong(++i, this.getRate());
-            pstmt.setInt(++i, this.getTimestamp());
-            pstmt.setInt(++i, this.getHeight());
+            pstmt.setLong(++i, this.transactionId);
+            pstmt.setLong(++i, this.currencyId);
+            pstmt.setLong(++i, this.blockId);
+            pstmt.setLong(++i, this.offerId);
+            pstmt.setLong(++i, this.sellerId);
+            pstmt.setLong(++i, this.buyerId);
+            pstmt.setLong(++i, this.units);
+            pstmt.setLong(++i, this.rate);
+            pstmt.setInt(++i, this.timestamp);
+            pstmt.setInt(++i, this.height);
             pstmt.executeUpdate();
         }
     }
@@ -215,9 +225,13 @@ public final class Exchange {
         return transactionId;
     }
 
-    public long getBlockId() { return blockId; }
+    public long getBlockId() {
+        return blockId;
+    }
 
-    public long getOfferId() { return offerId; }
+    public long getOfferId() {
+        return offerId;
+    }
 
     public long getSellerId() {
         return sellerId;
@@ -227,13 +241,21 @@ public final class Exchange {
         return buyerId;
     }
 
-    public long getUnits() { return units; }
+    public long getUnits() {
+        return units;
+    }
 
-    public long getRate() { return rate; }
+    public long getRate() {
+        return rate;
+    }
     
-    public long getCurrencyId() { return currencyId; }
+    public long getCurrencyId() {
+        return currencyId;
+    }
     
-    public int getTimestamp() { return timestamp; }
+    public int getTimestamp() {
+        return timestamp;
+    }
 
     public int getHeight() {
         return height;
@@ -241,8 +263,8 @@ public final class Exchange {
 
     @Override
     public String toString() {
-        return "Exchange currency: " + Convert.toUnsignedLong(currencyId) + " offer: " + Convert.toUnsignedLong(offerId)
-                + " rate: " + rate + " units: " + units + " height: " + height + " transaction: " + Convert.toUnsignedLong(transactionId);
+        return "Exchange currency: " + Long.toUnsignedString(currencyId) + " offer: " + Long.toUnsignedString(offerId)
+                + " rate: " + rate + " units: " + units + " height: " + height + " transaction: " + Long.toUnsignedString(transactionId);
     }
 
 }

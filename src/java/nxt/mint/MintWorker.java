@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.mint;
 
 import nxt.Attachment;
@@ -17,7 +33,6 @@ import org.json.simple.JSONValue;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
@@ -55,11 +70,7 @@ import java.util.concurrent.Future;
 public class MintWorker {
 
     // Verify-all name verifier
-    private final static HostnameVerifier hostNameVerifier = new HostnameVerifier() {
-        public boolean verify(String hostname, SSLSession session) {
-            return true;
-        }
-    };
+    private final static HostnameVerifier hostNameVerifier = (hostname, session) -> true;
 
     // Trust-all socket factory
     private static final SSLSocketFactory sslSocketFactory;
@@ -188,9 +199,7 @@ public class MintWorker {
     private long solve(Executor executor, Collection<Callable<Long>> solvers) {
         CompletionService<Long> ecs = new ExecutorCompletionService<>(executor);
         List<Future<Long>> futures = new ArrayList<>(solvers.size());
-        for (Callable<Long> solver : solvers) {
-            futures.add(ecs.submit(solver));
-        }
+        solvers.forEach(solver -> futures.add(ecs.submit(solver)));
         try {
             return ecs.take().get();
         } catch (ExecutionException | InterruptedException e) {
@@ -211,8 +220,7 @@ public class MintWorker {
                 .ecBlockHeight(((Long) ecBlock.get("ecBlockHeight")).intValue())
                 .ecBlockId(Convert.parseUnsignedLong((String) ecBlock.get("ecBlockId")));
         try {
-            Transaction transaction = builder.build();
-            transaction.sign(secretPhrase);
+            Transaction transaction = builder.build(secretPhrase);
             Map<String, String> params = new HashMap<>();
             params.put("requestType", "broadcastTransaction");
             params.put("transactionBytes", Convert.toHexString(transaction.getBytes()));
@@ -235,7 +243,7 @@ public class MintWorker {
     private JSONObject getMintingTarget(long currencyId, String rsAccount, long units) {
         Map<String, String> params = new HashMap<>();
         params.put("requestType", "getMintingTarget");
-        params.put("currency", Convert.toUnsignedLong(currencyId));
+        params.put("currency", Long.toUnsignedString(currencyId));
         params.put("account", rsAccount);
         params.put("units", Long.toString(units));
         return getJsonResponse(params);

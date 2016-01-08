@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.db;
 
 import java.sql.PreparedStatement;
@@ -6,7 +22,7 @@ import java.sql.SQLException;
 
 public interface DbKey {
 
-    public static abstract class Factory<T> {
+    abstract class Factory<T> {
 
         private final String pkClause;
         private final String pkColumns;
@@ -21,6 +37,10 @@ public interface DbKey {
         public abstract DbKey newKey(T t);
 
         public abstract DbKey newKey(ResultSet rs) throws SQLException;
+
+        public T newEntity(DbKey dbKey) {
+            throw new UnsupportedOperationException("Not implemented");
+        }
 
         public final String getPKClause() {
             return pkClause;
@@ -42,7 +62,7 @@ public interface DbKey {
     int setPK(PreparedStatement pstmt, int index) throws SQLException;
 
 
-    public static abstract class LongKeyFactory<T> extends Factory<T> {
+    abstract class LongKeyFactory<T> extends Factory<T> {
 
         private final String idColumn;
 
@@ -64,7 +84,7 @@ public interface DbKey {
 
     }
 
-    public static abstract class StringKeyFactory<T> extends Factory<T> {
+    abstract class StringKeyFactory<T> extends Factory<T> {
 
         private final String idColumn;
 
@@ -86,7 +106,7 @@ public interface DbKey {
 
     }
 
-    public static abstract class LinkKeyFactory<T> extends Factory<T> {
+    abstract class LinkKeyFactory<T> extends Factory<T> {
 
         private final String idColumnA;
         private final String idColumnB;
@@ -110,12 +130,16 @@ public interface DbKey {
 
     }
 
-    static final class LongKey implements DbKey {
+    final class LongKey implements DbKey {
 
         private final long id;
 
         private LongKey(long id) {
             this.id = id;
+        }
+
+        public long getId() {
+            return id;
         }
 
         @Override
@@ -141,12 +165,16 @@ public interface DbKey {
 
     }
 
-    static final class StringKey implements DbKey {
+    final class StringKey implements DbKey {
 
         private final String id;
 
         private StringKey(String id) {
             this.id = id;
+        }
+
+        public String getId() {
+            return id;
         }
 
         @Override
@@ -172,7 +200,7 @@ public interface DbKey {
 
     }
 
-    static final class LinkKey implements DbKey {
+    final class LinkKey implements DbKey {
 
         private final long idA;
         private final long idB;
@@ -180,6 +208,10 @@ public interface DbKey {
         private LinkKey(long idA, long idB) {
             this.idA = idA;
             this.idB = idB;
+        }
+
+        public long[] getId() {
+            return new long[]{idA, idB};
         }
 
         @Override

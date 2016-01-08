@@ -1,10 +1,25 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import nxt.db.DbIterator;
 import nxt.util.Logger;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -40,24 +55,29 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
         AbstractBlockchainTest.shutdown();
     }
 
-    @Before
-    public void reset() {
+    public void reset(int height) {
         debugTrace.resetLog();
-        if (blockchain.getHeight() > startHeight) {
-            blockchainProcessor.popOffTo(startHeight);
-            Assert.assertEquals(startHeight, blockchain.getHeight());
+        if (blockchain.getHeight() > height) {
+            blockchainProcessor.popOffTo(height);
+            Assert.assertEquals(height, blockchain.getHeight());
         }
-        Assert.assertTrue(blockchain.getHeight() <= startHeight);
+        Assert.assertTrue(blockchain.getHeight() <= height);
     }
 
     @Test
     public void fullDownloadAndRescanTest() {
+        reset(startHeight);
         download(startHeight, maxHeight);
-        rescan(blockchain.getHeight());
+        blockchainProcessor.scan(0, true);
+        Assert.assertEquals(maxHeight, blockchain.getHeight());
+        Logger.logMessage("Successfully rescanned blockchain from 0 to " + maxHeight);
+        compareTraceFiles();
+        debugTrace.resetLog();
     }
 
     @Test
     public void multipleRescanTest() {
+        reset(startHeight);
         int start = startHeight;
         int end;
         downloadTo(start);
@@ -76,6 +96,7 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
 
     @Test
     public void multiplePopOffTest() {
+        reset(startHeight);
         int start = startHeight;
         int end;
         downloadTo(start);
@@ -92,6 +113,7 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
     @Test
     public void reprocessTransactionsTest() {
         int start = Constants.LAST_KNOWN_BLOCK - 2000;
+        reset(start);
         int end;
         downloadTo(start);
         while (blockchain.getLastBlock().getTimestamp() < Nxt.getEpochTime() - 7200) {
@@ -118,6 +140,9 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
     }
 
     private static void rescan(final int numBlocks) {
+        if (numBlocks > Constants.MAX_ROLLBACK) {
+            return;
+        }
         int endHeight = blockchain.getHeight();
         int rescanHeight = endHeight - numBlocks;
         blockchainProcessor.scan(rescanHeight, true);
@@ -128,6 +153,9 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
     }
 
     private static void redownload(final int numBlocks, boolean preserveTransactions) {
+        if (numBlocks > Constants.MAX_ROLLBACK) {
+            return;
+        }
         int endHeight = blockchain.getHeight();
         List<List<Long>> allLessorsBefore = new ArrayList<>();
         List<List<Long>> allLessorBalancesBefore = new ArrayList<>();
@@ -143,7 +171,7 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
             try (DbIterator<Account> iter = account.getLessors(endHeight - numBlocks)) {
                 for (Account lessor : iter) {
                     lessors.add(lessor.getId());
-                    balances.add(lessor.getGuaranteedBalanceNQT(1440, endHeight - numBlocks));
+                    balances.add(lessor.getGuaranteedBalanceNQT(Constants.GUARANTEED_BALANCE_CONFIRMATIONS, endHeight - numBlocks));
                 }
             }
         }
@@ -182,7 +210,7 @@ public class BlockchainProcessorTest extends AbstractBlockchainTest {
             try (DbIterator<Account> iter = account.getLessors()) {
                 for (Account lessor : iter) {
                     lessors.add(lessor.getId());
-                    balances.add(lessor.getGuaranteedBalanceNQT(1440));
+                    balances.add(lessor.getGuaranteedBalanceNQT());
                 }
             }
         }

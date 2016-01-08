@@ -1,6 +1,6 @@
 Running the Nxt software:
 
-Dependencies: Java 7 or later needs to be installed first. Only the Oracle JVM
+Dependencies: Java 8 or later needs to be installed first. Only the Oracle JVM
 has been tested and supported.
 
 There is no installation needed. Unpack the nxt-client.zip package and open a
@@ -93,9 +93,6 @@ but only shows the form for the request type specified.
 
 http://localhost:7876/doc - a javadoc documentation for client developers who
 want to use the Java API directly instead of going through the http interface.
-
-http://localhost:7876/admin.html - some more commonly used commands, using the
-http interface.
 
 
 Compiling:

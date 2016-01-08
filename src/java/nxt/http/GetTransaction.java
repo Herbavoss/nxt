@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt.http;
 
 import nxt.Nxt;
@@ -16,7 +32,7 @@ public final class GetTransaction extends APIServlet.APIRequestHandler {
     static final GetTransaction instance = new GetTransaction();
 
     private GetTransaction() {
-        super(new APITag[] {APITag.TRANSACTIONS}, "transaction", "fullHash");
+        super(new APITag[] {APITag.TRANSACTIONS}, "transaction", "fullHash", "includePhasingResult");
     }
 
     @Override
@@ -27,6 +43,7 @@ public final class GetTransaction extends APIServlet.APIRequestHandler {
         if (transactionIdString == null && transactionFullHash == null) {
             return MISSING_TRANSACTION;
         }
+        boolean includePhasingResult = "true".equalsIgnoreCase(req.getParameter("includePhasingResult"));
 
         long transactionId = 0;
         Transaction transaction;
@@ -51,7 +68,7 @@ public final class GetTransaction extends APIServlet.APIRequestHandler {
             }
             return JSONData.unconfirmedTransaction(transaction);
         } else {
-            return JSONData.transaction(transaction);
+            return JSONData.transaction(transaction, includePhasingResult);
         }
 
     }

@@ -1,3 +1,19 @@
+/******************************************************************************
+ * Copyright © 2013-2016 The Nxt Core Developers.                             *
+ *                                                                            *
+ * See the AUTHORS.txt, DEVELOPER-AGREEMENT.txt and LICENSE.txt files at      *
+ * the top-level directory of this distribution for the individual copyright  *
+ * holder information and the developer policies on copyright and licensing.  *
+ *                                                                            *
+ * Unless otherwise agreed in a custom licensing agreement, no part of the    *
+ * Nxt software, including this file, may be copied, modified, propagated,    *
+ * or distributed except according to the terms contained in the LICENSE.txt  *
+ * file.                                                                      *
+ *                                                                            *
+ * Removal or modification of this copyright notice is prohibited.            *
+ *                                                                            *
+ ******************************************************************************/
+
 package nxt;
 
 import java.io.IOException;
@@ -44,6 +60,14 @@ public abstract class NxtException extends Exception {
 
     }
 
+    public static class ExistingTransactionException extends NotCurrentlyValidException {
+
+        public ExistingTransactionException(String message) {
+            super(message);
+        }
+
+    }
+
     public static final class NotYetEnabledException extends NotCurrentlyValidException {
 
         public NotYetEnabledException(String message) {
@@ -63,6 +87,42 @@ public abstract class NxtException extends Exception {
         }
 
         public NotValidException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+    }
+
+    public static class AccountControlException extends NotCurrentlyValidException {
+
+        public AccountControlException(String message) {
+            super(message);
+        }
+
+        public AccountControlException(String message, Throwable cause) {
+            super(message, cause);
+        }
+        
+    }
+
+    public static class InsufficientBalanceException extends NotCurrentlyValidException {
+
+        public InsufficientBalanceException(String message) {
+            super(message);
+        }
+
+        public InsufficientBalanceException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+    }
+
+    public static final class NotYetEncryptedException extends IllegalStateException {
+
+        public NotYetEncryptedException(String message) {
+            super(message);
+        }
+
+        public NotYetEncryptedException(String message, Throwable cause) {
             super(message, cause);
         }
 
